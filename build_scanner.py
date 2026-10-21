@@ -22,7 +22,7 @@ if not TESSDATA_DST.exists():
         print(f"Copying tessdata from {TESSDATA_SRC}...")
         shutil.copytree(TESSDATA_SRC, TESSDATA_DST)
     else:
-        print("⚠️  tessdata not found. OCR will need system Tesseract install.")
+        print("[WARN] tessdata not found. OCR will need system Tesseract install.")
 
 # Common PyInstaller args
 COMMON_ARGS = [
@@ -49,15 +49,15 @@ def build(script: Path, name: str, console: bool = False):
     exe = DIST / f"{name}.exe"
     if exe.exists():
         size_mb = exe.stat().st_size / (1024 * 1024)
-        print(f"✅ {name}: {exe} ({size_mb:.1f} MB)")
+        print(f"[OK] {name}: {exe} ({size_mb:.1f} MB)")
     else:
-        print(f"❌ {name} build failed")
+        print(f"[FAIL] {name} build failed")
     return exe
 
 if __name__ == "__main__":
-    print("╔══════════════════════════════════════════════════════════╗")
-    print("║     SC Price Scanner — Multi-Target Build                ║")
-    print("╚══════════════════════════════════════════════════════════╝")
+    print("=" * 60)
+    print("  SC Price Scanner - Multi-Target Build")
+    print("=" * 60)
     
     # 1. CLI Scanner (standalone, hotkey-based)
     build(Path("scanner.py"), "SC-Price-Scanner")
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     # 2. Overlay Bridge (stdin/stdout JSON for Electron)
     build(Path("scanner_overlay_bridge.py"), "SC-Price-Scanner-Bridge", console=True)
     
-    print("\n══════════════════════════════════════════════════════════")
+    print("\n" + "=" * 60)
     print("Build complete. Files in dist/:")
     for f in DIST.glob("*"):
         print(f"  {f.name} ({f.stat().st_size / 1024 / 1024:.1f} MB)")

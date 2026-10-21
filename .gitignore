@@ -1,0 +1,24 @@
+# Build artifacts
+dist/
+build/
+*.spec
+tessdata/
+scanner_region.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+electron-overlay/node_modules/
+electron-overlay/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
