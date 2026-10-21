@@ -13,9 +13,12 @@ import numpy as np
 from pathlib import Path
 from pynput import keyboard, mouse
 
-# Force UTF-8 output on Windows
-if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+# Force UTF-8 output on Windows (skip if stdout is None in --noconsole mode)
+if sys.platform == "win32" and sys.stdout is not None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # ---- Config ----
 SCAN_DIR = Path.home() / "SC-Scans"
@@ -103,7 +106,8 @@ def parse_rows(ocr_data):
         if not text:
             continue
         y = ocr_data["top"][i]
-        line_key = round(y / 12) * 12
+        # Wider bucket for line grouping (game fonts vary)
+        line_key = round(y / 20) * 20
         lines.setdefault(line_key, []).append(
             {"text": text, "x": ocr_data["left"][i], "conf": ocr_data["conf"][i]}
         )
@@ -111,27 +115,34 @@ def parse_rows(ocr_data):
     rows = []
     for y in sorted(lines.keys()):
         items = sorted(lines[y], key=lambda x: x["x"])
-        filtered = [(i["text"], i["conf"]) for i in items if i["conf"] > 30]
+        # Lower confidence threshold (game text is harder to OCR)
+        filtered = [(i["text"], i["conf"]) for i in items if i["conf"] > 10]
         if not filtered:
             continue
         texts = [t for t, _ in filtered]
 
+        # Find all numeric values in the row (handles commas, decimals, SCU labels)
         nums = []
-        for t in texts[1:]:
-            clean = t.replace(",", "").replace(".", "")
-            if clean.isdigit():
+        for t in texts:
+            # Remove SCU, aUEC, etc. labels
+            clean = t.upper().replace("SCU", "").replace("AUEC", "").replace(",", "").replace(".", "").strip()
+            if clean.isdigit() and len(clean) > 0:
                 nums.append(int(clean))
 
-        if len(nums) >= 2 and len(texts[0]) > 2:
-            rows.append(
-                {
-                    "commodity": texts[0],
-                    "buy": nums[0] if len(nums) > 0 else None,
-                    "sell": nums[1] if len(nums) > 1 else None,
-                    "stock": nums[2] if len(nums) > 2 else None,
-                    "demand": nums[3] if len(nums) > 3 else None,
-                }
-            )
+        # Need at least 2 numbers (buy + sell) and a commodity name
+        if len(nums) >= 2 and len(texts) >= 2:
+            # First non-numeric text is the commodity name
+            name = next((t for t in texts if not t.upper().replace(",", "").replace(".", "").isdigit()), texts[0])
+            if len(name) > 1:
+                rows.append(
+                    {
+                        "commodity": name,
+                        "buy": nums[0] if len(nums) > 0 else None,
+                        "sell": nums[1] if len(nums) > 1 else None,
+                        "stock": nums[2] if len(nums) > 2 else None,
+                        "demand": nums[3] if len(nums) > 3 else None,
+                    }
+                )
     return rows
 
 
@@ -142,7 +153,7 @@ def capture_and_parse():
         return
 
     region = load_region()
-    log("[SCAN] Capturing screen...")
+    log(f"[SCAN] Region: {region['width']}x{region['height']} at ({region['left']},{region['top']})")
 
     try:
         with mss.mss() as sct:
@@ -150,24 +161,53 @@ def capture_and_parse():
             img = np.array(screenshot)
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
+        # Save raw capture for debugging
+        debug_dir = SCAN_DIR / "debug"
+        debug_dir.mkdir(exist_ok=True)
+        cv2.imwrite(str(debug_dir / f"raw_{int(time.time())}.png"), img)
+
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
 
-        custom_config = (
-            r"--oem 3 --psm 6 "
-            r"-c tessedit_char_whitelist="
-            r"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,()-/'"
-        )
-        data = pytesseract.image_to_data(
-            thresh, output_type=pytesseract.Output.DICT, config=custom_config
+        # Try adaptive threshold (handles varying terminal brightness)
+        adaptive = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
         )
 
-        rows = parse_rows(data)
-        station = detect_station(data)
+        # Also try Otsu's threshold (auto-detects best cutoff)
+        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+        # Also try simple binary (light text on dark background)
+        _, simple = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+
+        # Run OCR on all three, pick the one with most results
+        config = r"--oem 3 --psm 6"
+
+        best_data = None
+        best_rows = []
+        best_name = ""
+
+        for name, processed in [("adaptive", adaptive), ("otsu", otsu), ("simple", simple)]:
+            data = pytesseract.image_to_data(
+                processed, output_type=pytesseract.Output.DICT, config=config
+            )
+            rows = parse_rows(data)
+            log(f"  [{name}] {len(rows)} rows detected")
+            if len(rows) > len(best_rows):
+                best_rows = rows
+                best_data = data
+                best_name = name
+
+        log(f"  [BEST] {best_name}: {len(best_rows)} rows")
+
+        rows = best_rows
+        station = detect_station(best_data) if best_data else "Unknown Station"
 
         if not rows:
-            log("[WARN] No commodities detected. Adjust region (F8) or check lighting.")
+            log("[WARN] No commodities detected. Try:")
+            log("  1. Re-calibrate with F8 (tighter region around table)")
+            log("  2. Make sure game is in BORDERLESS WINDOWED mode")
+            log(f"  3. Check debug image: {debug_dir}")
             return
 
         scan = {

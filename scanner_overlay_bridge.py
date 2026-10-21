@@ -14,9 +14,12 @@ import numpy as np
 from pathlib import Path
 from pynput import keyboard, mouse
 
-# Force UTF-8
-if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+# Force UTF-8 (skip if stdout is None)
+if sys.platform == "win32" and sys.stdout is not None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 SCAN_DIR = Path.home() / "SC-Scans"
 SCAN_DIR.mkdir(exist_ok=True)
@@ -94,7 +97,7 @@ def parse_rows(ocr_data):
         if not text:
             continue
         y = ocr_data["top"][i]
-        line_key = round(y / 12) * 12
+        line_key = round(y / 20) * 20
         lines.setdefault(line_key, []).append(
             {"text": text, "x": ocr_data["left"][i], "conf": ocr_data["conf"][i]}
         )
@@ -102,25 +105,27 @@ def parse_rows(ocr_data):
     rows = []
     for y in sorted(lines.keys()):
         items = sorted(lines[y], key=lambda x: x["x"])
-        filtered = [(i["text"], i["conf"]) for i in items if i["conf"] > 30]
+        filtered = [(i["text"], i["conf"]) for i in items if i["conf"] > 10]
         if not filtered:
             continue
         texts = [t for t, _ in filtered]
         nums = []
-        for t in texts[1:]:
-            clean = t.replace(",", "").replace(".", "")
-            if clean.isdigit():
+        for t in texts:
+            clean = t.upper().replace("SCU", "").replace("AUEC", "").replace(",", "").replace(".", "").strip()
+            if clean.isdigit() and len(clean) > 0:
                 nums.append(int(clean))
-        if len(nums) >= 2 and len(texts[0]) > 2:
-            rows.append(
-                {
-                    "commodity": texts[0],
-                    "buy": nums[0] if len(nums) > 0 else None,
-                    "sell": nums[1] if len(nums) > 1 else None,
-                    "stock": nums[2] if len(nums) > 2 else None,
-                    "demand": nums[3] if len(nums) > 3 else None,
-                }
-            )
+        if len(nums) >= 2 and len(texts) >= 2:
+            name = next((t for t in texts if not t.upper().replace(",", "").replace(".", "").isdigit()), texts[0])
+            if len(name) > 1:
+                rows.append(
+                    {
+                        "commodity": name,
+                        "buy": nums[0] if len(nums) > 0 else None,
+                        "sell": nums[1] if len(nums) > 1 else None,
+                        "stock": nums[2] if len(nums) > 2 else None,
+                        "demand": nums[3] if len(nums) > 3 else None,
+                    }
+                )
     return rows
 
 
@@ -139,21 +144,34 @@ def capture_and_parse():
             img = np.array(screenshot)
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
+        debug_dir = SCAN_DIR / "debug"
+        debug_dir.mkdir(exist_ok=True)
+        cv2.imwrite(str(debug_dir / f"raw_{int(time.time())}.png"), img)
+
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
 
-        config = (
-            r"--oem 3 --psm 6 "
-            r"-c tessedit_char_whitelist="
-            r"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,()-/'"
+        adaptive = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
         )
-        data = pytesseract.image_to_data(
-            thresh, output_type=pytesseract.Output.DICT, config=config
-        )
+        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        _, simple = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
 
-        rows = parse_rows(data)
-        station = detect_station(data)
+        config = r"--oem 3 --psm 6"
+        best_data = None
+        best_rows = []
+
+        for name, processed in [("adaptive", adaptive), ("otsu", otsu), ("simple", simple)]:
+            data = pytesseract.image_to_data(
+                processed, output_type=pytesseract.Output.DICT, config=config
+            )
+            rows = parse_rows(data)
+            if len(rows) > len(best_rows):
+                best_rows = rows
+                best_data = data
+
+        rows = best_rows
+        station = detect_station(best_data) if best_data else "Unknown Station"
 
         if not rows:
             send({"type": "status", "message": "No commodities detected. Adjust region (F8)."})
