@@ -156,7 +156,7 @@ def capture_and_parse():
     log(f"[SCAN] Region: {region['width']}x{region['height']} at ({region['left']},{region['top']})")
 
     try:
-        with mss.mss() as sct:
+        with mss.MSS() as sct:
             screenshot = sct.grab(region)
             img = np.array(screenshot)
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)

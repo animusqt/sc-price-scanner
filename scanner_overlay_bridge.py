@@ -139,7 +139,7 @@ def capture_and_parse():
     region = load_region()
 
     try:
-        with mss.mss() as sct:
+        with mss.MSS() as sct:
             screenshot = sct.grab(region)
             img = np.array(screenshot)
             img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
