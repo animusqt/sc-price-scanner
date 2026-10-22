@@ -454,7 +454,11 @@ def parse_commodities(ocr_data, image=None):
 # ------------------------------------------------------------------
 # Preprocessing + OCR runner (shared by scanner + bridge)
 # ------------------------------------------------------------------
-def preprocess(img, scale=5):
+def preprocess(img, scale=5, max_dim=3200):
+    h, w = img.shape[:2]
+    longest = float(max(h, w))
+    if longest > 0 and scale * longest > max_dim:
+        scale = max(1.5, max_dim / longest)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(gray)
@@ -463,9 +467,6 @@ def preprocess(img, scale=5):
     variants["otsu_inv"] = otsu_inv
     _, otsu = cv2.threshold(clahe, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     variants["otsu"] = otsu
-    variants["adaptive"] = cv2.adaptiveThreshold(
-        clahe, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 4
-    )
     return variants
 
 
@@ -530,9 +531,11 @@ def _merge_results(collected):
 def run_ocr(img):
     """Run many preprocessing/PSM passes and vote on the most reliable values."""
     variants = preprocess(img)
-    configs = ["--oem 3 --psm 6", "--oem 3 --psm 4", "--oem 3 --psm 11"]
+    # 2 preprocessors x 2 layouts is enough for reliable voting and keeps a scan
+    # under ~3s. The old adaptive/psm-11 passes were ~30x slower for no gain.
+    configs = ["--oem 3 --psm 6", "--oem 3 --psm 4"]
     layout_bonus = {"table": 50, "modal": 40, "guessed": 0, "unknown": -100}
-    variant_weight = {"otsu_inv": 6, "otsu": 2, "adaptive": 0}
+    variant_weight = {"otsu_inv": 6, "otsu": 2}
 
     collected = []
     layout_scores = {}
