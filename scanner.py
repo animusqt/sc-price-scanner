@@ -325,6 +325,13 @@ def main():
 
     try:
         run_preview()
+    except Exception as e:
+        log(f"[WARN] Preview UI unavailable ({e}). Running headless; hotkeys active. Ctrl+C to quit.")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
     finally:
         keyboard_listener.stop()
         mouse_listener.stop()
