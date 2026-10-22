@@ -58,8 +58,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install --upgrade pip
-          pip install pyinstaller mss opencv-python pytesseract pillow pynput numpy
+          python -m pip install pyinstaller mss opencv-python pytesseract pillow pynput numpy
 
       - name: Prepare tessdata
         run: |
@@ -95,6 +94,9 @@ jobs:
   build-overlay:
     name: Build Overlay (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -121,7 +123,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2
+          sudo apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1
+          sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2
 
       - name: Install dependencies
         run: |
