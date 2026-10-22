@@ -23,10 +23,35 @@ if sys.platform == "win32" and sys.stdout is not None:
     except Exception:
         pass
 
-SCAN_DIR = Path.home() / "SC-Scans"
-SCAN_DIR.mkdir(exist_ok=True)
+def _documents_dir():
+    home = Path.home()
+    for cand in (home / "OneDrive" / "Documents", home / "Documents"):
+        if cand.is_dir():
+            return cand
+    return home
+
+SCAN_DIR = _documents_dir() / "SC-Truckers Scans"
+SCAN_DIR.mkdir(parents=True, exist_ok=True)
 DEBUG_DIR = SCAN_DIR / "debug"
 CALIB_FILE = SCAN_DIR / "scanner_region.json"
+
+# Migrate calibration/scans from older locations (~/SC-Scans, local Documents)
+for _legacy in (Path.home() / "SC-Scans", Path.home() / "Documents" / "SC-Truckers Scans"):
+    if _legacy == SCAN_DIR or not _legacy.is_dir():
+        continue
+    _legacy_calib = _legacy / "scanner_region.json"
+    if not CALIB_FILE.exists() and _legacy_calib.exists():
+        try:
+            CALIB_FILE.write_text(_legacy_calib.read_text())
+        except Exception:
+            pass
+    for _json in _legacy.glob("*.json"):
+        _dest = SCAN_DIR / _json.name
+        if not _dest.exists():
+            try:
+                _dest.write_text(_json.read_text())
+            except Exception:
+                pass
 DEFAULT_REGION = {"top": 200, "left": 300, "width": 1200, "height": 800}
 
 if getattr(sys, "frozen", False):
@@ -117,15 +142,18 @@ def do_scan():
 
     station = sc_parser.detect_station(ocr_data) if ocr_data is not None else "Unknown Station"
     scan = {
-        "timestamp": time.time(),
+        "timestamp": int(time.time()),
         "station": station,
         "commodities": rows,
         "layout": layout,
         "source": "player-scan",
         "version": "1.1",
     }
-    (SCAN_DIR / f"scan_{stamp}.json").write_text(json.dumps(scan, indent=2))
-    send({"type": "scan_complete", "payload": scan})
+    safe_station = "".join(c if c.isalnum() else "-" for c in station).strip("-")[:40] or "Unknown"
+    out_path = SCAN_DIR / f"{safe_station}_{stamp}.json"
+    out_path.write_text(json.dumps(scan, indent=2))
+    send({"type": "status", "message": f"Saved {out_path.name} to {SCAN_DIR}"})
+    send({"type": "scan_complete", "payload": scan, "file": str(out_path)})
 
 
 def on_click(x, y, button, pressed):
@@ -198,6 +226,7 @@ if __name__ == "__main__":
         "type": "status",
         "message": f"Region {r['width']}x{r['height']} at ({r['left']},{r['top']})",
     })
+    send({"type": "status", "message": f"Scans folder: {SCAN_DIR}"})
 
     mouse_listener = mouse.Listener(on_click=on_click)
     mouse_listener.start()

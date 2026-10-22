@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('scannerAPI', {
   
   triggerScan: () => ipcRenderer.send('trigger-scan'),
   triggerCalibrate: () => ipcRenderer.send('trigger-calibrate'),
+  openScansFolder: () => ipcRenderer.send('open-scans-folder'),
+  getScansFolder: () => ipcRenderer.invoke('get-scans-folder'),
+  rendererReady: () => ipcRenderer.send('renderer-ready'),
   minimizeOverlay: () => ipcRenderer.send('overlay-minimize'),
   closeOverlay: () => ipcRenderer.send('overlay-close'),
   setClickThrough: (enabled) => ipcRenderer.send('set-click-through', enabled),

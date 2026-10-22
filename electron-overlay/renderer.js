@@ -1,6 +1,6 @@
 // Renderer process for SC Price Scanner Overlay
 
-const { scannerAPI } = window;
+const api = window.scannerAPI;
 
 let clickThrough = false;
 let lastScanData = null;
@@ -34,21 +34,22 @@ function init() {
   log('info', 'Overlay initialized');
   log('info', `Platform: ${navigator.platform}`);
   checkScannerConnection();
+  if (api.rendererReady) api.rendererReady();
 }
 
 function setupEventListeners() {
   // Window controls
-  elements.minimizeBtn.addEventListener('click', () => scannerAPI.minimizeOverlay());
-  elements.closeBtn.addEventListener('click', () => scannerAPI.closeOverlay());
+  elements.minimizeBtn.addEventListener('click', () => api.minimizeOverlay());
+  elements.closeBtn.addEventListener('click', () => api.closeOverlay());
   
   // Actions
   elements.scanBtn.addEventListener('click', () => {
-    scannerAPI.triggerScan();
+    api.triggerScan();
     setStatus('scanning', 'Scanning…');
   });
   
   elements.calibrateBtn.addEventListener('click', () => {
-    scannerAPI.triggerCalibrate();
+    api.triggerCalibrate();
     log('info', 'Calibration mode triggered (F8)');
   });
   
@@ -79,9 +80,9 @@ function setupEventListeners() {
   
   // Keyboard shortcuts (global via scanner, but also local)
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'F9') scannerAPI.triggerScan();
-    if (e.key === 'F8') scannerAPI.triggerCalibrate();
-    if (e.key === 'Escape') scannerAPI.minimizeOverlay();
+    if (e.key === 'F9') api.triggerScan();
+    if (e.key === 'F8') api.triggerCalibrate();
+    if (e.key === 'Escape') api.minimizeOverlay();
   });
   
   // Resize handling
@@ -89,9 +90,9 @@ function setupEventListeners() {
 }
 
 function setupScannerListeners() {
-  scannerAPI.onScannerOutput(handleScannerOutput);
-  scannerAPI.onScannerLog(handleScannerLog);
-  scannerAPI.onScannerExit(handleScannerExit);
+  api.onScannerOutput(handleScannerOutput);
+  api.onScannerLog(handleScannerLog);
+  api.onScannerExit(handleScannerExit);
 }
 
 function handleScannerOutput(data) {
@@ -104,6 +105,7 @@ function handleScannerOutput(data) {
     log('success', `Calibration saved: ${JSON.stringify(data.payload)}`);
   } else if (data.type === 'status') {
     log('info', data.message);
+    if (/bridge ready|^region /i.test(data.message)) setStatus('connected', 'Connected');
   }
 }
 
@@ -143,12 +145,14 @@ function updateScanPreview(scan) {
   
   // Build table
   const validRows = scan.commodities
-    .filter(c => c.buy && c.sell)
+    .filter(c => c.sell != null || c.buy != null)
     .map(c => ({
       ...c,
-      margin: ((c.sell - c.buy) / c.buy * 100).toFixed(1)
+      margin: (c.buy != null && c.sell != null && c.buy > 0)
+        ? (((c.sell - c.buy) / c.buy) * 100).toFixed(1)
+        : null
     }))
-    .sort((a, b) => parseFloat(b.margin) - parseFloat(a.margin))
+    .sort((a, b) => (parseFloat(b.margin) || -1e9) - (parseFloat(a.margin) || -1e9))
     .slice(0, 15);
   
   if (validRows.length === 0) {
@@ -172,7 +176,7 @@ function updateScanPreview(scan) {
               <td>${escapeHtml(c.commodity)}</td>
               <td class="right positive">${formatNumber(c.buy)}</td>
               <td class="right negative">${formatNumber(c.sell)}</td>
-              <td class="right margin">${c.margin}%</td>
+              <td class="right margin">${c.margin != null ? c.margin + '%' : '-'}</td>
               <td class="right">${formatNumber(c.stock)}</td>
               <td class="right">${formatNumber(c.demand)}</td>
             </tr>
@@ -204,7 +208,7 @@ function log(type, message) {
 
 function toggleClickThrough() {
   clickThrough = !clickThrough;
-  scannerAPI.setClickThrough(clickThrough);
+  api.setClickThrough(clickThrough);
   elements.clickThroughBtn.classList.toggle('active', clickThrough);
   elements.clickThroughBtn.title = clickThrough 
     ? 'Click-through ON (hold Shift + drag title bar to move)' 
@@ -213,9 +217,8 @@ function toggleClickThrough() {
 }
 
 function openScanFolder() {
-  // Would need IPC to open folder - for now log
-  log('info', 'Opening scan folder… (implement via IPC)');
-  // scannerAPI.openScanFolder();
+  api.openScansFolder();
+  api.getScansFolder().then((dir) => log('info', `Scans folder: ${dir}`));
 }
 
 function uploadToSite() {
@@ -271,7 +274,7 @@ function escapeHtml(text) {
 
 // Cleanup on unload
 window.addEventListener('beforeunload', () => {
-  scannerAPI.removeAllListeners('scanner-output');
-  scannerAPI.removeAllListeners('scanner-log');
-  scannerAPI.removeAllListeners('scanner-exit');
+  api.removeAllListeners('scanner-output');
+  api.removeAllListeners('scanner-log');
+  api.removeAllListeners('scanner-exit');
 });

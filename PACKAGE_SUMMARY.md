@@ -29,7 +29,7 @@ sc_price_scanner/
 ### 1. **CLI Scanner** (`scanner.py` → `SC-Price-Scanner.exe`)
 - **Standalone, zero dependencies** — runs on any Windows PC
 - **Hotkeys:** F8=calibrate region, F9=scan terminal, F10=quit
-- **Output:** JSON files in `~/SC-Scans/scan_<timestamp>.json`
+- **Output:** JSON files in `Documents\SC-Truckers Scans\<Station>_<timestamp>.json`
 - **Safety:** Screen capture only (DXGI Desktop Duplication), no game injection
 
 ### 2. **Overlay Bridge** (`scanner_overlay_bridge.py` → `SC-Price-Scanner-Bridge.exe`)
@@ -69,7 +69,7 @@ python build_scanner.py
 # 2. Test CLI scanner
 dist/SC-Price-Scanner.exe
 # Press F8 → click terminal corners → F9 on commodity kiosk
-# Check ~/SC-Scans/scan_*.json
+# Check Documents\SC-Truckers Scans\*.json
 
 # 3. Test Electron overlay (dev)
 cd electron-overlay

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, nativeImage, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, nativeImage, Tray, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -7,6 +7,35 @@ let overlayWindow = null;
 let tray = null;
 let scannerProcess = null;
 const isDev = process.argv.includes('--dev');
+
+// Buffer scanner output until the renderer has registered its listeners,
+// otherwise the Bridge's startup lines are emitted before the window is ready.
+let rendererReady = false;
+const pendingMessages = [];
+
+function toRenderer(channel, payload) {
+  try {
+    const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    fs.appendFileSync(
+      path.join(scansFolder(), 'overlay.log'),
+      `${new Date().toISOString()} ${channel} ${text}\n`
+    );
+  } catch {}
+  if (rendererReady && overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send(channel, payload);
+    return;
+  }
+  pendingMessages.push([channel, payload]);
+  if (pendingMessages.length > 500) pendingMessages.shift();
+}
+
+function flushPending() {
+  if (!overlayWindow) return;
+  while (pendingMessages.length) {
+    const [channel, payload] = pendingMessages.shift();
+    overlayWindow.webContents.send(channel, payload);
+  }
+}
 
 // The Bridge build speaks the JSON stdin/stdout protocol. Prefer it; fall back
 // to the CLI build (which just responds to hotkeys) if that's all we have.
@@ -43,7 +72,7 @@ function createOverlayWindow() {
   
   overlayWindow = new BrowserWindow({
     width: 340,
-    height: 480,
+    height: 620,
     x: width - 360,
     y: 100,
     frame: false,
@@ -65,6 +94,16 @@ function createOverlayWindow() {
   });
 
   overlayWindow.loadFile(path.join(__dirname, 'overlay.html'));
+
+  overlayWindow.webContents.on('preload-error', (_e, preloadPath, error) => {
+    toRenderer('scanner-log', `Preload error (${preloadPath}): ${error && error.message}`);
+  });
+
+  // Stay above fullscreen games (Windows/macOS compositor levels)
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+  if (overlayWindow.setVisibleOnAllWorkspaces) {
+    overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
   
   // Dev tools in dev mode
   if (isDev) overlayWindow.webContents.openDevTools({ mode: 'detach' });
@@ -116,7 +155,7 @@ function launchScanner() {
   if (!scannerPath) {
     const msg = `Scanner not found. Build it first (python build_scanner.py) or place the exe in resources/scanner/.`;
     console.error(msg);
-    overlayWindow?.webContents.send('scanner-log', msg);
+    toRenderer('scanner-log', msg);
     return;
   }
 
@@ -128,7 +167,7 @@ function launchScanner() {
     });
 
     scannerProcess.on('error', (err) => {
-      overlayWindow?.webContents.send('scanner-log', `Failed to launch scanner: ${err.message}`);
+      toRenderer('scanner-log', `Failed to launch scanner: ${err.message}`);
     });
 
     scannerProcess.stdout.on('data', (data) => {
@@ -138,30 +177,34 @@ function launchScanner() {
         if (line.startsWith('{')) {
           try {
             const msg = JSON.parse(line);
-            overlayWindow?.webContents.send('scanner-output', msg);
+            toRenderer('scanner-output', msg);
           } catch {}
         } else {
-          overlayWindow?.webContents.send('scanner-log', line);
+          toRenderer('scanner-log', line);
         }
       });
     });
 
     scannerProcess.stderr.on('data', (data) => {
-      overlayWindow?.webContents.send('scanner-log', `ERR: ${data}`);
+      toRenderer('scanner-log', `ERR: ${data}`);
     });
 
     scannerProcess.on('exit', (code) => {
-      overlayWindow?.webContents.send('scanner-exit', code);
+      toRenderer('scanner-exit', code);
     });
 
     console.log(`Scanner launched: ${scannerPath}`);
   } catch (err) {
     console.error('Failed to launch scanner:', err);
-    overlayWindow?.webContents.send('scanner-log', `Failed to launch scanner: ${err.message}`);
+    toRenderer('scanner-log', `Failed to launch scanner: ${err.message}`);
   }
 }
 
 app.whenReady().then(() => {
+  try {
+    fs.mkdirSync(scansFolder(), { recursive: true });
+    fs.writeFileSync(path.join(scansFolder(), 'overlay.log'), '');
+  } catch {}
   createOverlayWindow();
   createTray();
   launchScanner();
@@ -181,6 +224,17 @@ app.on('before-quit', () => {
 });
 
 // IPC handlers
+ipcMain.on('renderer-ready', () => {
+  rendererReady = true;
+  flushPending();
+});
+setTimeout(() => {
+  if (!rendererReady) {
+    rendererReady = true;
+    flushPending();
+  }
+}, 4000);
+
 ipcMain.on('overlay-minimize', () => overlayWindow?.hide());
 ipcMain.on('overlay-close', () => { app.isQuitting = true; app.quit(); });
 ipcMain.on('trigger-scan', () => sendToScanner('scan'));
@@ -189,4 +243,16 @@ ipcMain.on('set-click-through', (_, enabled) => {
   if (overlayWindow) {
     overlayWindow.setIgnoreMouseEvents(enabled, { forward: true });
   }
+});
+
+function scansFolder() {
+  return path.join(app.getPath('documents'), 'SC-Truckers Scans');
+}
+
+ipcMain.handle('get-scans-folder', () => scansFolder());
+ipcMain.on('open-scans-folder', async () => {
+  const dir = scansFolder();
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const err = await shell.openPath(dir);
+  if (err) toRenderer('scanner-log', `Could not open ${dir}: ${err}`);
 });

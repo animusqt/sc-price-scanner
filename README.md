@@ -6,7 +6,7 @@
 2. Run it — no install needed
 3. Press **F8** once to calibrate (click corners of commodity terminal)
 4. In-game: open a commodity kiosk → press **F9** to scan
-5. JSON scans appear in `~/SC-Scans/`
+5. JSON scans appear in `Documents\SC-Truckers Scans\` (opened via the overlay's **Open Scan Folder** button)
 6. Drag any `.json` into your website's **Import Scan** button
 
 ---
@@ -90,8 +90,9 @@ if c > 30:  # lower = more permissive, higher = stricter
 
 ### Change output folder
 ```python
-# Line ~15
-SCAN_DIR = Path.home() / "SC-Scans"
+# Lines ~34-45
+SCAN_DIR = Path.home() / "OneDrive" / "Documents" / "SC-Truckers Scans"
+# Falls back to Path.home() / "Documents" / "SC-Truckers Scans"
 ```
 
 ---

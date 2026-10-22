@@ -32,10 +32,36 @@ if sys.platform == "win32" and sys.stdout is not None:
         pass
 
 # ---- Paths ----
-SCAN_DIR = Path.home() / "SC-Scans"
-SCAN_DIR.mkdir(exist_ok=True)
+def _documents_dir():
+    home = Path.home()
+    for cand in (home / "OneDrive" / "Documents", home / "Documents"):
+        if cand.is_dir():
+            return cand
+    return home
+
+SCAN_DIR = _documents_dir() / "SC-Truckers Scans"
+SCAN_DIR.mkdir(parents=True, exist_ok=True)
 DEBUG_DIR = SCAN_DIR / "debug"
 CALIB_FILE = SCAN_DIR / "scanner_region.json"
+
+# Migrate calibration/scans from older locations (~/SC-Scans, local Documents)
+for _legacy in (Path.home() / "SC-Scans", Path.home() / "Documents" / "SC-Truckers Scans"):
+    if _legacy == SCAN_DIR or not _legacy.is_dir():
+        continue
+    _legacy_calib = _legacy / "scanner_region.json"
+    if not CALIB_FILE.exists() and _legacy_calib.exists():
+        try:
+            CALIB_FILE.write_text(_legacy_calib.read_text())
+            print(f"Migrated calibration -> {CALIB_FILE}")
+        except Exception:
+            pass
+    for _json in _legacy.glob("*.json"):
+        _dest = SCAN_DIR / _json.name
+        if not _dest.exists():
+            try:
+                _dest.write_text(_json.read_text())
+            except Exception:
+                pass
 
 # ---- Tesseract ----
 if getattr(sys, "frozen", False):
@@ -136,14 +162,15 @@ def do_scan():
     station = sc_parser.detect_station(ocr_data) if ocr_data is not None else "Unknown Station"
 
     scan = {
-        "timestamp": time.time(),
+        "timestamp": int(time.time()),
         "station": station,
         "commodities": rows,
         "layout": layout,
         "source": "player-scan",
         "version": "1.1",
     }
-    out = SCAN_DIR / f"scan_{stamp}.json"
+    safe_station = "".join(c if c.isalnum() else "-" for c in station).strip("-")[:40] or "Unknown"
+    out = SCAN_DIR / f"{safe_station}_{stamp}.json"
     out.write_text(json.dumps(scan, indent=2))
 
     log(f"[OK] {len(rows)} commodities ({layout}) from {station} -> {out.name}")
