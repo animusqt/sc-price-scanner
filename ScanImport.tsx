@@ -2,7 +2,7 @@
 import { useState, DragEvent, ChangeEvent } from 'react';
 import { Upload, Check, X, FileText, Loader2 } from 'lucide-react';
 
-interface ScanData {
+export interface ScanData {
   timestamp: number;
   station: string;
   commodities: Array<{
