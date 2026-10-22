@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, screen, nativeImage, Tray, Menu } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 
 let overlayWindow = null;
@@ -7,12 +8,35 @@ let tray = null;
 let scannerProcess = null;
 const isDev = process.argv.includes('--dev');
 
-// Scanner executable name per platform
-const SCANNER_EXE = {
-  win32: 'SC-Price-Scanner.exe',
-  darwin: 'SC-Price-Scanner-mac',
-  linux: 'SC-Price-Scanner-linux'
-}[process.platform];
+// The Bridge build speaks the JSON stdin/stdout protocol. Prefer it; fall back
+// to the CLI build (which just responds to hotkeys) if that's all we have.
+const SCANNER_CANDIDATES = {
+  win32: ['SC-Price-Scanner-Bridge.exe', 'SC-Price-Scanner.exe'],
+  darwin: ['SC-Price-Scanner-Bridge-mac', 'SC-Price-Scanner-mac'],
+  linux: ['SC-Price-Scanner-Bridge-linux', 'SC-Price-Scanner-linux'],
+}[process.platform] || [];
+
+function resolveScannerPath() {
+  const roots = [
+    process.resourcesPath ? path.join(process.resourcesPath, 'scanner') : null,
+    process.resourcesPath || null,
+    path.join(__dirname, '..', 'dist'),
+    path.join(__dirname, '..', 'scanner'),
+    path.join(app.getAppPath(), 'scanner'),
+    path.join(app.getAppPath(), '..', 'dist'),
+    __dirname,
+  ].filter(Boolean);
+
+  for (const root of roots) {
+    for (const name of SCANNER_CANDIDATES) {
+      const candidate = path.join(root, name);
+      try {
+        if (fs.existsSync(candidate)) return candidate;
+      } catch (_) {}
+    }
+  }
+  return null;
+}
 
 function createOverlayWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
@@ -81,42 +105,55 @@ function createTray() {
 }
 
 function sendToScanner(action) {
-  if (scannerProcess && !scannerProcess.killed) {
+  if (scannerProcess && !scannerProcess.killed && scannerProcess.stdin.writable) {
     scannerProcess.stdin.write(JSON.stringify({ action }) + '\n');
   }
 }
 
 function launchScanner() {
-  const scannerPath = path.join(process.resourcesPath || __dirname, '..', 'scanner', SCANNER_EXE);
-  
+  const scannerPath = resolveScannerPath();
+
+  if (!scannerPath) {
+    const msg = `Scanner not found. Build it first (python build_scanner.py) or place the exe in resources/scanner/.`;
+    console.error(msg);
+    overlayWindow?.webContents.send('scanner-log', msg);
+    return;
+  }
+
   try {
     scannerProcess = spawn(scannerPath, [], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      detached: false
+      detached: false,
+      windowsHide: true
     });
-    
+
+    scannerProcess.on('error', (err) => {
+      overlayWindow?.webContents.send('scanner-log', `Failed to launch scanner: ${err.message}`);
+    });
+
     scannerProcess.stdout.on('data', (data) => {
-      const lines = data.toString().trim().split('\n');
+      const lines = data.toString().trim().split(/\r?\n/);
       lines.forEach(line => {
+        if (!line) return;
         if (line.startsWith('{')) {
           try {
             const msg = JSON.parse(line);
             overlayWindow?.webContents.send('scanner-output', msg);
           } catch {}
-        } else if (line) {
+        } else {
           overlayWindow?.webContents.send('scanner-log', line);
         }
       });
     });
-    
+
     scannerProcess.stderr.on('data', (data) => {
       overlayWindow?.webContents.send('scanner-log', `ERR: ${data}`);
     });
-    
+
     scannerProcess.on('exit', (code) => {
       overlayWindow?.webContents.send('scanner-exit', code);
     });
-    
+
     console.log(`Scanner launched: ${scannerPath}`);
   } catch (err) {
     console.error('Failed to launch scanner:', err);

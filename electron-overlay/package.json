@@ -21,6 +21,13 @@
       "overlay.css",
       "renderer.js"
     ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "scanner",
+        "filter": ["**/*"]
+      }
+    ],
     "win": {
       "target": "nsis",
       "icon": "icon.ico"
