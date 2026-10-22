@@ -21,6 +21,9 @@ jobs:
   build-scanner:
     name: Build Scanner (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
