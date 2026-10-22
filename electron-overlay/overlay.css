@@ -388,15 +388,19 @@ body {
 .log-message.success { color: var(--success); }
 .log-message.info { color: var(--accent); }
 
-/* Resize handle */
+/* Resize handle (small corner grip only, must not cover the UI) */
 .resize-handle {
-  width: 100%;
-  height: 100%;
+  width: 16px;
+  height: 16px;
   position: absolute;
   bottom: 0;
   right: 0;
   cursor: se-resize;
   -webkit-app-region: no-drag;
+  z-index: 10;
+  border-right: 2px solid var(--border-bright);
+  border-bottom: 2px solid var(--border-bright);
+  border-radius: 0 0 10px 0;
 }
 
 /* Scrollbar */

@@ -99,6 +99,10 @@ function createOverlayWindow() {
     toRenderer('scanner-log', `Preload error (${preloadPath}): ${error && error.message}`);
   });
 
+  // Exclude the overlay from screen capture so it can never occlude the OCR
+  // region (Windows 10 2004+ / macOS). It stays visible on screen.
+  try { overlayWindow.setContentProtection(true); } catch {}
+
   // Stay above fullscreen games (Windows/macOS compositor levels)
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   if (overlayWindow.setVisibleOnAllWorkspaces) {
@@ -250,6 +254,9 @@ function scansFolder() {
 }
 
 ipcMain.handle('get-scans-folder', () => scansFolder());
+ipcMain.on('open-site', () => {
+  shell.openExternal('https://sc-truckers.lovable.app/market');
+});
 ipcMain.on('open-scans-folder', async () => {
   const dir = scansFolder();
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}

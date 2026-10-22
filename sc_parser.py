@@ -21,7 +21,9 @@ Notes on the OCR heuristics (learned from real captures):
     into a 2-digit group on a 5-digit value, and strip it.
 """
 
+import json
 import re
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -60,15 +62,19 @@ PLAIN_RE = re.compile(r"\d+")
 # Common Star Citizen commodities (used to clean up noisy OCR names)
 KNOWN_COMMODITIES = [
     "Acrylic", "Agricium", "Agricultural Supplies", "Aluminium", "Ammonia",
-    "Argon", "Astrocrete", "Beryl", "Bexalite", "Borase", "Chlorine",
-    "Compboard", "Construction Blocks", "Copper", "Corundum", "Decari",
-    "Diamond", "Distillates", "Energy", "Fluorine", "Gold", "Gasoline",
-    "Hephaestanite", "Hydrogen", "Inert Materials", "Iodine", "Iridium",
-    "Laranite", "Liquid Fuel", "Medical Supplies", "Nitrogen", "Partillium",
-    "Pressurized Ice", "Processed Food", "Quantanium", "Quartz", "Recycled",
-    "Recycled Material Composite", "Research", "Salvage", "Scrap", "Steel",
-    "Stims", "Tin", "Titanium", "Tungsten", "Waste", "Xenon", "Zinc",
-    "Aluminium", "RCM", "Waste", "Scrap", "Steel",
+    "Aphorite", "Argon", "Astatine", "Astrocrete", "Beradom", "Beryl",
+    "Bexalite", "Borase", "Chlorine", "Compboard", "Construction Blocks",
+    "Copper", "Corundum", "Decari", "Diamond", "Distillates",
+    "Distilled Spirits", "Dolivine", "Energy", "Feynmaline", "Fluorine",
+    "Fresh Food", "Gasoline", "Glacosite", "Gold", "Hadanite",
+    "Hephaestanite", "Helium", "Hydrogen", "Inert Materials", "Iodine",
+    "Iridium", "Jaclium", "Janalite", "Laranite", "Lindinium",
+    "Liquid Fuel", "Medical Supplies", "Nitrogen", "Ouratite",
+    "Partillium", "Pressurized Ice", "Processed Food", "Quantanium",
+    "Quartz", "Recycled", "Recycled Material Composite", "Research",
+    "Salvage", "Savrilium", "Scrap", "Steel", "Stims", "Taranite",
+    "Tin", "Titanium", "Torite", "Tungsten", "Waste", "Xenon", "Zinc",
+    "RCM",
 ]
 
 # Letter -> digit confusions common in game/pixel fonts
@@ -274,6 +280,20 @@ def parse_modal(lines):
             c = canonical_commodity(s["text"])
             if c:
                 name = c
+                break
+        if not name:
+            # Unknown commodity: accept a clean title/uppercase label on the card
+            for s in line["segments"]:
+                t = s["text"].strip()
+                if not re.fullmatch(r"[A-Z][A-Za-z'&.\- ]{2,28}", t):
+                    continue
+                nt = _norm(t)
+                if _is_noise(t) or any(
+                    bad in nt
+                    for bad in ("shop", "quantity", "inventory", "stock", "cargo", "available", "scu")
+                ):
+                    continue
+                name = t.title() if t.isupper() else t
                 break
         if not name:
             continue
@@ -640,3 +660,78 @@ def detect_station(ocr_data):
             if len(nk) >= 4 and (nk in n or n in nk):
                 return k
     return "Unknown Station"
+
+# ------------------------------------------------------------------
+# Scan history (remember every scan, merged per station)
+# ------------------------------------------------------------------
+def merge_history(scan_dir, station, rows, ts):
+    """Upsert a scan into history.json and return the merged station snapshot.
+
+    Non-null fields from the newest scan win; older known values are kept, so
+    repeated scans build up a fuller picture even if one pass misses a row.
+    """
+    path = Path(scan_dir) / "history.json"
+    hist = {"version": 1, "stations": {}}
+    loaded_ok = False
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict) and isinstance(loaded.get("stations"), dict):
+            hist = loaded
+            loaded_ok = True
+    except Exception:
+        pass
+
+    def upsert(st, items, when):
+        for row in items:
+            name = (row.get("commodity") or "").strip()
+            if not name:
+                continue
+            key = canonical_commodity(name) or name
+            entry = st["commodities"].setdefault(key, {})
+            for field in ("buy", "sell", "stock", "demand"):
+                value = row.get(field)
+                if value is not None:
+                    entry[field] = value
+            entry["scanned_at"] = int(when)
+
+    # First run: seed from every scan JSON already in the folder
+    if not loaded_ok:
+        for p in Path(scan_dir).glob("*.json"):
+            if p.name == "history.json":
+                continue
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            old_station = data.get("station")
+            old_rows = data.get("commodities")
+            if not old_station or not isinstance(old_rows, list):
+                continue
+            old_ts = data.get("timestamp") or 0
+            st = hist["stations"].setdefault(old_station, {"commodities": {}, "updated": 0})
+            upsert(st, old_rows, old_ts)
+            st["updated"] = max(int(st.get("updated") or 0), int(old_ts))
+
+    station_key = (station or "Unknown Station").strip() or "Unknown Station"
+    st = hist["stations"].setdefault(station_key, {"commodities": {}, "updated": 0})
+    upsert(st, rows, ts)
+
+    st["updated"] = max(int(st.get("updated") or 0), int(ts))
+    hist["version"] = 1
+    try:
+        path.write_text(json.dumps(hist, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    merged = []
+    for name in sorted(st["commodities"]):
+        entry = st["commodities"][name]
+        merged.append({
+            "commodity": name,
+            "buy": entry.get("buy"),
+            "sell": entry.get("sell"),
+            "stock": entry.get("stock"),
+            "demand": entry.get("demand"),
+            "scanned_at": entry.get("scanned_at"),
+        })
+    return merged

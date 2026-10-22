@@ -222,9 +222,12 @@ function openScanFolder() {
 }
 
 function uploadToSite() {
-  if (!lastScanData) return;
-  log('info', 'Upload to SC-Truckers… (implement via fetch to your API)');
-  // Implementation: POST to your backend /api/scans/import
+  if (!lastScanData) {
+    log('warn', 'Scan something first (F9), then upload');
+    return;
+  }
+  api.openSite();
+  log('info', 'Opened SC-Truckers market - drag the JSON from the scans folder into Import Scan');
 }
 
 function setupResize() {

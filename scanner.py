@@ -160,11 +160,13 @@ def do_scan():
         return None
 
     station = sc_parser.detect_station(ocr_data) if ocr_data is not None else "Unknown Station"
+    ts = int(time.time())
+    merged_rows = sc_parser.merge_history(SCAN_DIR, station, rows, ts)
 
     scan = {
-        "timestamp": int(time.time()),
+        "timestamp": ts,
         "station": station,
-        "commodities": rows,
+        "commodities": merged_rows,
         "layout": layout,
         "source": "player-scan",
         "version": "1.1",
@@ -173,7 +175,7 @@ def do_scan():
     out = SCAN_DIR / f"{safe_station}_{stamp}.json"
     out.write_text(json.dumps(scan, indent=2))
 
-    log(f"[OK] {len(rows)} commodities ({layout}) from {station} -> {out.name}")
+    log(f"[OK] {len(rows)} new / {len(merged_rows)} known commodities ({layout}) from {station} -> {out.name}")
     return scan
 
 
