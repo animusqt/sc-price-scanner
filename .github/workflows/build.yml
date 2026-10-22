@@ -1,4 +1,4 @@
-name: Build SC Price Scanner & Overlay
+name: Build SC Price Scanner and Overlay
 
 on:
   push:
@@ -27,15 +27,12 @@ jobs:
         include:
           - os: windows-latest
             name: windows
-            exe: SC-Price-Scanner.exe
             artifact: scanner-win
           - os: macos-latest
             name: macos
-            exe: SC-Price-Scanner-mac
             artifact: scanner-mac
           - os: ubuntu-latest
             name: linux
-            exe: SC-Price-Scanner-linux
             artifact: scanner-linux
     steps:
       - name: Checkout
@@ -45,18 +42,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install system dependencies
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            echo "Windows - using winget"
-            winget install --id UB-Mannheim.TesseractOCR --silent --accept-source-agreements --accept-package-agreements
+            choco install tesseract --no-progress -y
           elif [ "$RUNNER_OS" = "macOS" ]; then
-            echo "macOS - using brew"
             brew install tesseract
           else
-            echo "Linux - using apt"
             sudo apt-get update && sudo apt-get install -y tesseract-ocr libtesseract-dev
           fi
 
@@ -79,8 +72,7 @@ jobs:
           fi
 
       - name: Build scanner executable
-        run: |
-          python build_scanner.py
+        run: python build_scanner.py
 
       - name: Verify build
         run: |
@@ -121,8 +113,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: electron-overlay/package-lock.json
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -158,7 +148,7 @@ jobs:
   release:
     name: Create Release
     needs: [build-scanner, build-overlay]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -170,25 +160,13 @@ jobs:
       - name: Organize release files
         run: |
           mkdir -p release
-          
-          # Scanner binaries
           mv artifacts/scanner-win/* release/ 2>/dev/null || true
           mv artifacts/scanner-mac/* release/ 2>/dev/null || true
           mv artifacts/scanner-linux/* release/ 2>/dev/null || true
-          
-          # Overlay installers
           mv artifacts/overlay-win/* release/ 2>/dev/null || true
           mv artifacts/overlay-mac/* release/ 2>/dev/null || true
           mv artifacts/overlay-linux/* release/ 2>/dev/null || true
-          
-          # Rename for clarity
-          cd release
-          for f in *; do
-            # Normalize names
-            mv "$f" "$(echo "$f" | sed 's/SC-Price-Scanner-/scanner-/; s/SC-Price-Scanner-Overlay-/overlay-/')" 2>/dev/null || true
-          done
-          
-          ls -la
+          ls -la release
 
       - name: Generate checksums
         run: |
@@ -199,68 +177,42 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: SC Price Scanner ${{ github.ref_name }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+          name: SC Price Scanner ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
           body: |
-            ## SC Price Scanner ${{ github.ref_name }}
-            
-            ### ðŸ“¥ Downloads
-            
-            **Standalone Scanner (CLI, hotkey-based):**
-            - Windows: \`scanner-win.exe\`
-            - macOS: \`scanner-mac\` (run \`chmod +x scanner-mac\`)
-            - Linux: \`scanner-linux\` (run \`chmod +x scanner-linux\`)
-            
-            **Electron Overlay (Always-on-top GUI):**
-            - Windows: \`overlay-win.exe\` (NSIS installer) or \`overlay-win-portable.exe\`
-            - macOS: \`overlay-mac.dmg\`
-            - Linux: \`overlay-linux.AppImage\`
-            
-            ### ðŸ”§ Usage
-            
-            **Scanner (CLI):**
-            1. Run the executable
-            2. Press **F8** once to calibrate (click corners of commodity terminal)
-            3. In-game: open commodity kiosk â†’ press **F9** to scan
-            4. JSON scans saved to \`~/SC-Scans/\`
-            5. Drag \`.json\` into SC-Truckers Market page â†’ "Import Scan"
-            
-            **Overlay (GUI):**
-            1. Install/run the overlay app
-            2. It stays always-on-top (pin to corner of screen)
-            3. Click "Scan Terminal" or press **F9** in-game
-            4. Results appear in overlay, auto-saves JSON
-            5. Click "Upload to SC-Truckers" to send directly
-            
-            ### ðŸ›¡ï¸ Safety
-            - **No game injection, no memory reads, no hooks**
-            - Uses Windows Desktop Duplication API (same as OBS/Discord)
-            - Runs as standard user, no admin required
-            - Near-zero ban risk â€” purely external screen capture + OCR
-            
-            ### ðŸ“‹ Checksums
-            See \`SHA256SUMS.txt\` for file verification.
+            ## SC Price Scanner
+
+            ### Downloads
+            - Windows scanner: SC-Price-Scanner.exe
+            - macOS scanner: SC-Price-Scanner-mac (chmod +x first)
+            - Linux scanner: SC-Price-Scanner-linux (chmod +x first)
+            - Windows overlay: NSIS installer / portable exe
+            - macOS overlay: dmg
+            - Linux overlay: AppImage
+
+            ### Usage (CLI scanner)
+            1. Run the executable.
+            2. Press F8 once to calibrate (click corners of the commodity terminal).
+            3. In game: open the commodity kiosk, press F9 to scan.
+            4. JSON scans are saved to ~/SC-Scans/.
+            5. Drag the .json into the SC-Truckers Market page and click Import.
+
+            ### Usage (Overlay)
+            1. Run the overlay next to the scanner exe (same folder) so it can find it.
+            2. It stays always-on-top.
+            3. Click Scan Terminal or press F9 in game.
+            4. Results appear in the overlay and a JSON is saved.
+
+            ### Safety
+            - No game injection, no memory reads, no hooks.
+            - Uses standard desktop screen capture (same technology as OBS/Discord).
+            - Runs as a normal user, no admin required.
+
+            ### Checksums
+            See SHA256SUMS.txt.
           draft: false
           prerelease: false
           files: |
             release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ============================================================
-  # Publish to npm (optional, for overlay)
-  # ============================================================
-  # publish-npm:
-  #   name: Publish to npm
-  #   needs: release
-  #   if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-node@v4
-  #       with:
-  #         node-version: '20'
-  #         registry-url: 'https://registry.npmjs.org'
-  #     - run: cd electron-overlay && npm publish
-  #       env:
-  #         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
