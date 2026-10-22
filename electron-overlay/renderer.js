@@ -22,13 +22,22 @@ const elements = {
   uploadToSite: document.getElementById('uploadToSite'),
   logConsole: document.getElementById('logConsole'),
   titleBar: document.getElementById('titleBar'),
-  resizeHandle: document.getElementById('resizeHandle')
+  resizeHandle: document.getElementById('resizeHandle'),
+  settingsBtn: document.getElementById('settingsBtn'),
+  settingsPanel: document.getElementById('settingsPanel'),
+  closeSettings: document.getElementById('closeSettings'),
+  settingsDone: document.getElementById('settingsDone'),
+  settingsOpenFolder: document.getElementById('settingsOpenFolder'),
+  lockWindow: document.getElementById('lockWindow'),
+  minToTray: document.getElementById('minToTray'),
+  themeChips: Array.from(document.querySelectorAll('[data-theme-choice]'))
 };
 
 // Initialize
 document.addEventListener('DOMContentLoaded', init);
 
 function init() {
+  initSettings();
   setupEventListeners();
   setupScannerListeners();
   log('info', 'Overlay initialized');
@@ -37,10 +46,99 @@ function init() {
   if (api.rendererReady) api.rendererReady();
 }
 
+/* ------------------------------------------------------------------
+   Settings
+   ------------------------------------------------------------------ */
+const SETTINGS_KEY = 'scanner.settings';
+const DEFAULT_SETTINGS = { theme: null, locked: false, minToTray: true };
+let settings = { ...DEFAULT_SETTINGS, theme: null };
+let collapsed = false;
+
+function detectTheme() {
+  const h = new Date().getHours();
+  if (h >= 6 && h < 16) return 'morning';
+  if (h >= 16 && h < 20) return 'evening';
+  return 'night';
+}
+
+function initSettings() {
+  try {
+    settings = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
+  } catch {
+    settings = { ...DEFAULT_SETTINGS, theme: null };
+  }
+  if (!settings.theme) settings.theme = detectTheme();
+
+  elements.lockWindow.checked = !!settings.locked;
+  elements.minToTray.checked = settings.minToTray !== false;
+
+  applyTheme(settings.theme);
+  applyLock(!!settings.locked);
+  if (api.setCloseToTray) api.setCloseToTray(elements.minToTray.checked);
+}
+
+function saveSettings() {
+  settings.theme = document.documentElement.dataset.theme || settings.theme;
+  settings.locked = elements.lockWindow.checked;
+  settings.minToTray = elements.minToTray.checked;
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {}
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  elements.themeChips.forEach((chip) => {
+    chip.classList.toggle('active', chip.dataset.themeChoice === theme);
+  });
+}
+
+function applyLock(locked) {
+  document.body.classList.toggle('locked', locked);
+  if (api.setLocked) api.setLocked(locked);
+}
+
+function toggleCollapse(force) {
+  collapsed = typeof force === 'boolean' ? force : !collapsed;
+  document.body.classList.toggle('collapsed', collapsed);
+  elements.minimizeBtn.title = collapsed ? 'Expand' : 'Collapse';
+  if (api.setCollapsed) api.setCollapsed(collapsed);
+  if (collapsed) elements.settingsPanel.hidden = true;
+}
+
+function openSettings() {
+  if (collapsed) toggleCollapse(false);
+  elements.settingsPanel.hidden = false;
+}
+
+function closeSettingsPanel() {
+  elements.settingsPanel.hidden = true;
+}
+
 function setupEventListeners() {
   // Window controls
-  elements.minimizeBtn.addEventListener('click', () => api.minimizeOverlay());
+  elements.minimizeBtn.addEventListener('click', () => toggleCollapse());
   elements.closeBtn.addEventListener('click', () => api.closeOverlay());
+
+  // Settings
+  elements.settingsBtn.addEventListener('click', openSettings);
+  elements.closeSettings.addEventListener('click', closeSettingsPanel);
+  elements.settingsDone.addEventListener('click', closeSettingsPanel);
+  elements.settingsOpenFolder.addEventListener('click', openScanFolder);
+  elements.themeChips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      applyTheme(chip.dataset.themeChoice);
+      saveSettings();
+    });
+  });
+  elements.lockWindow.addEventListener('change', () => {
+    applyLock(elements.lockWindow.checked);
+    saveSettings();
+  });
+  elements.minToTray.addEventListener('change', () => {
+    if (api.setCloseToTray) api.setCloseToTray(elements.minToTray.checked);
+    saveSettings();
+  });
   
   // Actions
   elements.scanBtn.addEventListener('click', () => {
@@ -82,7 +180,13 @@ function setupEventListeners() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'F9') api.triggerScan();
     if (e.key === 'F8') api.triggerCalibrate();
-    if (e.key === 'Escape') api.minimizeOverlay();
+    if (e.key === 'Escape') {
+      if (!elements.settingsPanel.hidden) {
+        closeSettingsPanel();
+      } else {
+        toggleCollapse();
+      }
+    }
   });
   
   // Resize handling
@@ -97,6 +201,7 @@ function setupScannerListeners() {
 
 function handleScannerOutput(data) {
   if (data.type === 'scan_complete') {
+    if (collapsed) toggleCollapse(false);
     lastScanData = data.payload;
     updateScanPreview(data.payload);
     setStatus('connected', 'Connected');
@@ -233,27 +338,31 @@ function uploadToSite() {
 function setupResize() {
   let isResizing = false;
   let startWidth, startHeight, startX, startY;
-  
-  elements.resizeHandle.addEventListener('mousedown', (e) => {
-    if (clickThrough) return;
+
+  elements.resizeHandle.addEventListener('mousedown', async (e) => {
+    if (clickThrough || collapsed || document.body.classList.contains('locked')) return;
     isResizing = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    const rect = document.getElementById('app').getBoundingClientRect();
-    startWidth = rect.width;
-    startHeight = rect.height;
+    startX = e.screenX;
+    startY = e.screenY;
+    try {
+      const b = await api.getBounds();
+      startWidth = b ? b.width : window.innerWidth;
+      startHeight = b ? b.height : window.innerHeight;
+    } catch {
+      startWidth = window.innerWidth;
+      startHeight = window.innerHeight;
+    }
     e.preventDefault();
   });
-  
-  document.addEventListener('mousemove', (e) => {
+
+  window.addEventListener('mousemove', (e) => {
     if (!isResizing) return;
-    const newWidth = Math.max(300, startWidth + (e.clientX - startX));
-    const newHeight = Math.max(400, startHeight + (e.clientY - startY));
-    document.getElementById('app').style.width = newWidth + 'px';
-    document.getElementById('app').style.height = newHeight + 'px';
+    const width = Math.max(260, startWidth + (e.screenX - startX));
+    const height = Math.max(300, startHeight + (e.screenY - startY));
+    if (api.resizeWindow) api.resizeWindow(width, height);
   });
-  
-  document.addEventListener('mouseup', () => { isResizing = false; });
+
+  window.addEventListener('mouseup', () => { isResizing = false; });
 }
 
 // Helpers

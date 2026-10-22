@@ -1,17 +1,47 @@
 :root {
-  --bg: #0d0d0d;
-  --bg-elevated: #141414;
-  --border: #2a2a2a;
-  --border-bright: #3a3a3a;
-  --fg: #e8e8e8;
-  --fg-muted: #888;
-  --accent: #00ccff;
-  --accent-dim: #0099cc;
-  --success: #00cc66;
-  --warning: #ffcc00;
-  --danger: #ff4444;
-  --card-bg: rgba(20, 20, 20, 0.95);
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  /* Mirrors sc-truckers.lovable.app (evening / default) */
+  --bg: oklch(16% 0.028 253);
+  --bg-elevated: oklch(20.5% 0.032 253);
+  --border: oklch(31% 0.036 250);
+  --border-bright: oklch(40% 0.04 250);
+  --fg: oklch(94% 0.012 240);
+  --fg-muted: oklch(70% 0.024 245);
+  --primary: oklch(79% 0.155 76);
+  --primary-fg: oklch(17% 0.03 253);
+  --accent: oklch(72% 0.11 210);
+  --accent-dim: oklch(62% 0.1 210);
+  --success: oklch(74% 0.16 150);
+  --warning: oklch(78% 0.16 80);
+  --danger: oklch(62% 0.22 25);
+  --card-bg: oklch(20.5% 0.032 253 / 0.96);
+  --shadow: 0 12px 32px oklch(0% 0 0 / 0.5);
+}
+
+html[data-theme="morning"] {
+  --bg: oklch(98% 0.008 235);
+  --bg-elevated: oklch(99.5% 0.004 235);
+  --border: oklch(86% 0.012 235);
+  --border-bright: oklch(78% 0.02 235);
+  --fg: oklch(22% 0.024 250);
+  --fg-muted: oklch(46% 0.022 250);
+  --primary: oklch(62% 0.16 240);
+  --primary-fg: oklch(99% 0.005 235);
+  --accent: oklch(56% 0.14 210);
+  --accent-dim: oklch(48% 0.13 210);
+  --success: oklch(52% 0.14 150);
+  --warning: oklch(60% 0.15 70);
+  --danger: oklch(55% 0.2 25);
+  --card-bg: oklch(99.5% 0.004 235 / 0.97);
+  --shadow: 0 12px 32px oklch(30% 0.03 250 / 0.18);
+}
+
+html[data-theme="night"] {
+  --bg: oklch(14% 0.028 253);
+  --bg-elevated: oklch(19% 0.032 253);
+  --border: oklch(28% 0.034 250);
+  --border-bright: oklch(37% 0.038 250);
+  --card-bg: oklch(19% 0.032 253 / 0.97);
+  --shadow: 0 12px 32px oklch(0% 0 0 / 0.65);
 }
 
 * {
@@ -21,7 +51,7 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Barlow', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
   line-height: 1.5;
   color: var(--fg);
@@ -29,6 +59,7 @@ body {
   -webkit-user-select: none;
   user-select: none;
   overflow: hidden;
+  transition: color 0.2s ease;
 }
 
 .overlay-window {
@@ -69,6 +100,7 @@ body {
 }
 
 .title {
+  font-family: 'Chakra Petch', 'Barlow', sans-serif;
   font-weight: 600;
   font-size: 13px;
   letter-spacing: 0.3px;
@@ -151,10 +183,11 @@ body {
 }
 
 .card-header h3 {
+  font-family: 'Chakra Petch', 'Barlow', sans-serif;
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
   color: var(--fg-muted);
 }
 
@@ -236,8 +269,8 @@ body {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent), var(--accent-dim));
-  color: #000;
+  background: linear-gradient(160deg, var(--primary), color-mix(in oklch, var(--primary) 80%, black));
+  color: var(--primary-fg);
 }
 
 .btn-primary:hover {
@@ -435,3 +468,151 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+/* ------------------------------------------------------------------
+   Settings, collapse and window lock
+   ------------------------------------------------------------------ */
+.overlay-window {
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.settings-panel {
+  position: absolute;
+  inset: 36px 0 0 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--card-bg);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid var(--border);
+  -webkit-app-region: no-drag;
+}
+
+.settings-panel[hidden] { display: none; }
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-header h3 {
+  font-family: 'Chakra Petch', 'Barlow', sans-serif;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+}
+
+.settings-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.setting-label {
+  font-family: 'Chakra Petch', 'Barlow', sans-serif;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+}
+
+.theme-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.theme-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.theme-chip:hover { border-color: var(--border-bright); }
+
+.theme-chip.active {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.swatch {
+  width: 100%;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid oklch(50% 0.02 250 / 0.35);
+}
+
+.swatch.morning { background: linear-gradient(135deg, oklch(98% 0.008 235), oklch(62% 0.16 240)); }
+.swatch.evening { background: linear-gradient(135deg, oklch(20% 0.03 253), oklch(79% 0.155 76)); }
+.swatch.night   { background: linear-gradient(135deg, oklch(14% 0.028 253), oklch(72% 0.11 210)); }
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.setting-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.setting-hint {
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-top: -6px;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.settings-actions .btn {
+  flex: 1;
+  padding: 10px 12px;
+}
+
+/* Collapsed state: only the title bar remains */
+body.collapsed .content,
+body.collapsed .settings-panel,
+body.collapsed .resize-handle {
+  display: none;
+}
+
+body.collapsed .title-bar {
+  border-bottom: none;
+  border-radius: 9px;
+}
+
+body.collapsed .collapse-icon { transform: rotate(180deg); }
+
+.collapse-icon { transition: transform 0.2s ease; }
+
+/* Locked state: no dragging or resizing */
+body.locked .title-bar { -webkit-app-region: no-drag; cursor: default; }
+body.locked .resize-handle { display: none; }

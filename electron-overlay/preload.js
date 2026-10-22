@@ -14,6 +14,11 @@ contextBridge.exposeInMainWorld('scannerAPI', {
   minimizeOverlay: () => ipcRenderer.send('overlay-minimize'),
   closeOverlay: () => ipcRenderer.send('overlay-close'),
   setClickThrough: (enabled) => ipcRenderer.send('set-click-through', enabled),
+  setCollapsed: (collapsed) => ipcRenderer.send('set-collapsed', !!collapsed),
+  setCloseToTray: (enabled) => ipcRenderer.send('set-close-to-tray', !!enabled),
+  setLocked: (locked) => ipcRenderer.send('set-locked', !!locked),
+  getBounds: () => ipcRenderer.invoke('get-bounds'),
+  resizeWindow: (width, height) => ipcRenderer.send('resize-window', { width, height }),
   
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)

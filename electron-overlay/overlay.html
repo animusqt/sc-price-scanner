@@ -4,7 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SC Price Scanner Overlay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="overlay.css">
+  <script>
+    (function () {
+      try {
+        var saved = JSON.parse(localStorage.getItem('scanner.settings') || '{}').theme;
+        var h = new Date().getHours();
+        var theme = saved || (h >= 6 && h < 16 ? 'morning' : h >= 16 && h < 20 ? 'evening' : 'night');
+        document.documentElement.dataset.theme = theme;
+      } catch (e) {
+        document.documentElement.dataset.theme = 'night';
+      }
+    })();
+  </script>
 </head>
 <body>
   <div id="app" class="overlay-window">
@@ -24,12 +39,18 @@
             <path d="M12 8v8M8 12h8"/>
           </svg>
         </button>
-        <button class="icon-btn" id="minimizeBtn" title="Minimize to tray">
+        <button class="icon-btn" id="settingsBtn" title="Settings">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M5 12h14"/>
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
         </button>
-        <button class="icon-btn danger" id="closeBtn" title="Quit">
+        <button class="icon-btn" id="minimizeBtn" title="Collapse">
+          <svg class="icon collapse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+        <button class="icon-btn danger" id="closeBtn" title="Close">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12"/>
           </svg>
@@ -125,6 +146,50 @@
         <div class="log-console" id="logConsole"></div>
       </section>
     </main>
+
+    <!-- Settings -->
+    <section class="settings-panel" id="settingsPanel" hidden>
+      <div class="settings-header">
+        <h3>Settings</h3>
+        <button class="icon-btn" id="closeSettings" title="Close settings">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="settings-body">
+        <div>
+          <span class="setting-label">Appearance</span>
+          <div class="theme-row" role="radiogroup" aria-label="Theme">
+            <button class="theme-chip" data-theme-choice="morning" type="button">
+              <span class="swatch morning"></span>Day
+            </button>
+            <button class="theme-chip" data-theme-choice="evening" type="button">
+              <span class="swatch evening"></span>Evening
+            </button>
+            <button class="theme-chip" data-theme-choice="night" type="button">
+              <span class="swatch night"></span>Night
+            </button>
+          </div>
+        </div>
+
+        <label class="setting-row">
+          <input type="checkbox" id="lockWindow">
+          <span>Lock window position</span>
+        </label>
+
+        <label class="setting-row">
+          <input type="checkbox" id="minToTray">
+          <span>Minimize to tray when closing</span>
+        </label>
+        <p class="setting-hint">Unchecked, the close button quits the app completely.</p>
+
+        <div class="settings-actions">
+          <button class="btn btn-ghost" id="settingsOpenFolder" type="button">Open scans folder</button>
+          <button class="btn btn-primary" id="settingsDone" type="button">Done</button>
+        </div>
+      </div>
+    </section>
 
     <!-- Resize handle -->
     <div class="resize-handle" id="resizeHandle"></div>

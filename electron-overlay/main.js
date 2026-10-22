@@ -6,6 +6,10 @@ const { spawn } = require('child_process');
 let overlayWindow = null;
 let tray = null;
 let scannerProcess = null;
+let closeToTray = true;
+let expandedHeight = 620;
+let isCollapsed = false;
+let isLocked = false;
 const isDev = process.argv.includes('--dev');
 
 // Buffer scanner output until the renderer has registered its listeners,
@@ -99,6 +103,50 @@ function createOverlayWindow() {
     toRenderer('scanner-log', `Preload error (${preloadPath}): ${error && error.message}`);
   });
 
+  // Optional UI self-test: SCANNER_SELFTEST=1 exercises settings/collapse/theme
+  if (process.env.SCANNER_SELFTEST === '1') {
+    overlayWindow.webContents.on('did-finish-load', async () => {
+      try {
+        const result = await overlayWindow.webContents.executeJavaScript(`(async () => {
+          await new Promise((r) => setTimeout(r, 600));
+          const $ = (id) => document.getElementById(id);
+          const out = {};
+          out.theme = document.documentElement.dataset.theme;
+          out.panelHidden = $('settingsPanel').hidden;
+          $('settingsBtn').click();
+          out.panelOpened = !$('settingsPanel').hidden;
+          document.querySelector('[data-theme-choice="morning"]').click();
+          out.themeAfter = document.documentElement.dataset.theme;
+          out.bgAfter = getComputedStyle($('app')).backgroundColor;
+          const A = window.scannerAPI;
+          const before = await A.getBounds();
+          A.resizeWindow(480, 520);
+          await new Promise((r) => setTimeout(r, 250));
+          const after = await A.getBounds();
+          out.resized = !!after && after.width === 480 && after.height === 520;
+          A.resizeWindow(before.width, before.height);
+          await new Promise((r) => setTimeout(r, 150));
+          $('minimizeBtn').click();
+          out.collapsed = document.body.classList.contains('collapsed');
+          $('minimizeBtn').click();
+          out.expanded = !document.body.classList.contains('collapsed');
+          $('lockWindow').click();
+          out.locked = document.body.classList.contains('locked');
+          $('lockWindow').click();
+          out.unlocked = !document.body.classList.contains('locked');
+          $('closeSettings').click();
+          out.panelClosed = $('settingsPanel').hidden;
+          document.querySelector('[data-theme-choice="' + out.theme + '"]').click();
+          out.themeRestored = document.documentElement.dataset.theme;
+          return JSON.stringify(out);
+        })()`);
+        toRenderer('scanner-log', 'selftest ' + result);
+      } catch (e) {
+        toRenderer('scanner-log', 'selftest failed: ' + e.message);
+      }
+    });
+  }
+
   // Exclude the overlay from screen capture so it can never occlude the OCR
   // region (Windows 10 2004+ / macOS). It stays visible on screen.
   try { overlayWindow.setContentProtection(true); } catch {}
@@ -112,11 +160,15 @@ function createOverlayWindow() {
   // Dev tools in dev mode
   if (isDev) overlayWindow.webContents.openDevTools({ mode: 'detach' });
 
-  // Prevent window from being closed, just hide
+  // Close honours the "minimize to tray" setting
   overlayWindow.on('close', (e) => {
-    if (!app.isQuitting) {
-      e.preventDefault();
+    if (app.isQuitting) return;
+    e.preventDefault();
+    if (closeToTray) {
       overlayWindow.hide();
+    } else {
+      app.isQuitting = true;
+      app.quit();
     }
   });
 
@@ -240,7 +292,33 @@ setTimeout(() => {
 }, 4000);
 
 ipcMain.on('overlay-minimize', () => overlayWindow?.hide());
-ipcMain.on('overlay-close', () => { app.isQuitting = true; app.quit(); });
+ipcMain.on('overlay-close', () => {
+  if (closeToTray) {
+    overlayWindow?.hide();
+    return;
+  }
+  app.isQuitting = true;
+  app.quit();
+});
+ipcMain.on('set-close-to-tray', (_, enabled) => { closeToTray = !!enabled; });
+ipcMain.on('set-locked', (_, locked) => {
+  isLocked = !!locked;
+  if (overlayWindow) overlayWindow.setMovable(!isLocked);
+  if (overlayWindow) overlayWindow.setResizable(!isLocked && !isCollapsed);
+});
+ipcMain.on('set-collapsed', (_, collapsedState) => {
+  if (!overlayWindow) return;
+  isCollapsed = !!collapsedState;
+  const b = overlayWindow.getBounds();
+  if (isCollapsed) {
+    if (b.height > 60) expandedHeight = b.height;
+    overlayWindow.setResizable(false);
+    overlayWindow.setBounds({ x: b.x, y: b.y, width: b.width, height: 38 });
+  } else {
+    overlayWindow.setResizable(!isLocked);
+    overlayWindow.setBounds({ x: b.x, y: b.y, width: b.width, height: expandedHeight });
+  }
+});
 ipcMain.on('trigger-scan', () => sendToScanner('scan'));
 ipcMain.on('trigger-calibrate', () => sendToScanner('calibrate'));
 ipcMain.on('set-click-through', (_, enabled) => {
@@ -253,6 +331,15 @@ function scansFolder() {
   return path.join(app.getPath('documents'), 'SC-Truckers Scans');
 }
 
+ipcMain.handle('get-bounds', () => (overlayWindow ? overlayWindow.getBounds() : null));
+ipcMain.on('resize-window', (_, size) => {
+  if (!overlayWindow || isCollapsed) return;
+  const b = overlayWindow.getBounds();
+  const width = Math.max(260, Math.round(size.width));
+  const height = Math.max(300, Math.round(size.height));
+  overlayWindow.setBounds({ x: b.x, y: b.y, width, height });
+  expandedHeight = height;
+});
 ipcMain.handle('get-scans-folder', () => scansFolder());
 ipcMain.on('open-site', () => {
   shell.openExternal('https://sc-truckers.lovable.app/market');
