@@ -1,6 +1,6 @@
 {
   "name": "sc-price-scanner-overlay",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Always-on-top overlay for SC Price Scanner",
   "main": "main.js",
   "scripts": {
@@ -19,7 +19,10 @@
       "preload.js",
       "overlay.html",
       "overlay.css",
-      "renderer.js"
+      "renderer.js",
+      "icon.png",
+      "icon.ico",
+      "icon.icns"
     ],
     "win": {
       "target": "nsis",

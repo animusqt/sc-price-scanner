@@ -80,6 +80,7 @@ function createOverlayWindow() {
     height: 620,
     x: width - 360,
     y: 100,
+    icon: path.join(__dirname, 'icon.png'),
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -241,8 +242,14 @@ function createOverlayWindow() {
 
 function createTray() {
   const iconPath = path.join(__dirname, 'icon.png');
-  const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
-  
+  let icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    icon = nativeImage.createFromPath(path.join(__dirname, 'icon.ico'));
+  }
+  if (!icon.isEmpty()) {
+    icon = icon.resize({ width: 16, height: 16 });
+  }
+
   tray = new Tray(icon);
   
   const contextMenu = Menu.buildFromTemplate([
