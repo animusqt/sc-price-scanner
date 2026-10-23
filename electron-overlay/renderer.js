@@ -10,7 +10,6 @@ const elements = {
   scannerStatus: document.getElementById('scannerStatus'),
   lastScan: document.getElementById('lastScan'),
   commodityCount: document.getElementById('commodityCount'),
-  stationName: document.getElementById('stationName'),
   scanBtn: document.getElementById('scanBtn'),
   calibrateBtn: document.getElementById('calibrateBtn'),
   clickThroughBtn: document.getElementById('clickThroughBtn'),
@@ -45,21 +44,32 @@ function init() {
   log('info', `Platform: ${navigator.platform}`);
   checkScannerConnection();
   if (api.rendererReady) api.rendererReady();
+  requestAnimationFrame(scheduleFit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit);
 }
 
 /* ------------------------------------------------------------------
    Settings
    ------------------------------------------------------------------ */
 const SETTINGS_KEY = 'scanner.settings';
-const DEFAULT_SETTINGS = { theme: null, locked: false, minToTray: true, station: '' };
+const DEFAULT_SETTINGS = {
+  theme: null,
+  locked: false,
+  minToTray: true,
+  station: '',
+  panels: { preview: false, actions: false, log: false }
+};
 let settings = { ...DEFAULT_SETTINGS, theme: null };
 let collapsed = false;
 
+function normalizeTheme(theme) {
+  if (theme === 'light' || theme === 'morning') return 'light';
+  return 'dark';
+}
+
 function detectTheme() {
   const h = new Date().getHours();
-  if (h >= 6 && h < 16) return 'morning';
-  if (h >= 16 && h < 20) return 'evening';
-  return 'night';
+  return (h >= 6 && h < 18) ? 'light' : 'dark';
 }
 
 function initSettings() {
@@ -68,6 +78,7 @@ function initSettings() {
   } catch {
     settings = { ...DEFAULT_SETTINGS, theme: null };
   }
+  settings.panels = { ...DEFAULT_SETTINGS.panels, ...(settings.panels || {}) };
   if (!settings.theme) settings.theme = detectTheme();
 
   elements.lockWindow.checked = !!settings.locked;
@@ -75,6 +86,7 @@ function initSettings() {
   elements.stationInput.value = settings.station || '';
 
   applyTheme(settings.theme);
+  applyPanels();
   applyLock(!!settings.locked);
   if (api.setCloseToTray) api.setCloseToTray(elements.minToTray.checked);
   if (api.setStation) api.setStation(settings.station || '');
@@ -91,9 +103,18 @@ function saveSettings() {
 }
 
 function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.theme = normalizeTheme(theme);
   elements.themeChips.forEach((chip) => {
-    chip.classList.toggle('active', chip.dataset.themeChoice === theme);
+    chip.classList.toggle('active', chip.dataset.themeChoice === document.documentElement.dataset.theme);
+  });
+}
+
+function applyPanels() {
+  document.querySelectorAll('.card-toggle').forEach((btn) => {
+    const card = btn.closest('.card');
+    const isCollapsed = !!settings.panels[btn.dataset.panel];
+    card.classList.toggle('panel-collapsed', isCollapsed);
+    btn.title = isCollapsed ? 'Expand panel' : 'Collapse panel';
   });
 }
 
@@ -107,7 +128,25 @@ function toggleCollapse(force) {
   document.body.classList.toggle('collapsed', collapsed);
   elements.minimizeBtn.title = collapsed ? 'Expand' : 'Collapse';
   if (api.setCollapsed) api.setCollapsed(collapsed);
-  if (collapsed) elements.settingsPanel.hidden = true;
+  if (collapsed) {
+    elements.settingsPanel.hidden = true;
+  } else {
+    scheduleFit();
+  }
+}
+
+let fitTimer = null;
+
+function scheduleFit() {
+  clearTimeout(fitTimer);
+  fitTimer = setTimeout(fitWindow, 60);
+}
+
+function fitWindow() {
+  if (collapsed || !api.fitHeight) return;
+  const app = document.getElementById('app');
+  const height = Math.ceil(app.getBoundingClientRect().height);
+  if (height > 0) api.fitHeight(height);
 }
 
 function openSettings() {
@@ -147,6 +186,18 @@ function setupEventListeners() {
     settings.station = elements.stationInput.value.trim();
     if (api.setStation) api.setStation(settings.station);
     saveSettings();
+  });
+
+  // Panel collapse
+  document.querySelectorAll('.card-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.card');
+      const isCollapsed = card.classList.toggle('panel-collapsed');
+      settings.panels[btn.dataset.panel] = isCollapsed;
+      btn.title = isCollapsed ? 'Expand panel' : 'Collapse panel';
+      saveSettings();
+      scheduleFit();
+    });
   });
   
   // Actions
@@ -255,7 +306,9 @@ function setStatus(state, label) {
 function updateScanPreview(scan) {
   elements.lastScan.textContent = formatTimeAgo(scan.timestamp);
   elements.commodityCount.textContent = scan.commodities.length;
-  elements.stationName.textContent = scan.station;
+  if (!elements.stationInput.value) {
+    elements.stationInput.placeholder = 'Auto: ' + scan.station;
+  }
   
   // Build table
   const validRows = scan.commodities
@@ -293,6 +346,7 @@ function updateScanPreview(scan) {
   }
   
   elements.previewCard.style.display = 'block';
+  scheduleFit();
 }
 
 function log(type, message) {

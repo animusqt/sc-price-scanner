@@ -111,15 +111,15 @@ function createOverlayWindow() {
         const result = await overlayWindow.webContents.executeJavaScript(`(async () => {
           await new Promise((r) => setTimeout(r, 600));
           const $ = (id) => document.getElementById(id);
+          const A = window.scannerAPI;
           const out = {};
           out.theme = document.documentElement.dataset.theme;
           out.panelHidden = $('settingsPanel').hidden;
           $('settingsBtn').click();
           out.panelOpened = !$('settingsPanel').hidden;
-          document.querySelector('[data-theme-choice="morning"]').click();
+          document.querySelector('[data-theme-choice="light"]').click();
           out.themeAfter = document.documentElement.dataset.theme;
           out.bgAfter = getComputedStyle($('app')).backgroundColor;
-          const A = window.scannerAPI;
           const before = await A.getBounds();
           A.resizeWindow(480, 520);
           await new Promise((r) => setTimeout(r, 250));
@@ -127,6 +127,17 @@ function createOverlayWindow() {
           out.resized = !!after && after.width === 480 && after.height === 520;
           A.resizeWindow(before.width, before.height);
           await new Promise((r) => setTimeout(r, 150));
+          out.panelCount = document.querySelectorAll('.card-toggle').length;
+          const logBtn = document.querySelector('[data-panel="log"]');
+          const startH = (await A.getBounds()).height;
+          logBtn.click();
+          await new Promise((r) => setTimeout(r, 400));
+          out.logCollapsed = $('logCard').classList.contains('panel-collapsed');
+          const collapsedH = (await A.getBounds()).height;
+          logBtn.click();
+          await new Promise((r) => setTimeout(r, 400));
+          const expandedH = (await A.getBounds()).height;
+          out.panelShrinksWindow = collapsedH < startH && expandedH > collapsedH;
           $('minimizeBtn').click();
           out.collapsed = document.body.classList.contains('collapsed');
           $('minimizeBtn').click();
@@ -346,6 +357,14 @@ ipcMain.on('resize-window', (_, size) => {
   const height = Math.max(300, Math.round(size.height));
   overlayWindow.setBounds({ x: b.x, y: b.y, width, height });
   expandedHeight = height;
+});
+ipcMain.on('fit-height', (_, height) => {
+  if (!overlayWindow || isCollapsed) return;
+  const b = overlayWindow.getBounds();
+  const target = Math.max(120, Math.min(1000, Math.round(height)));
+  if (Math.abs(b.height - target) < 2) return;
+  overlayWindow.setBounds({ x: b.x, y: b.y, width: b.width, height: target });
+  expandedHeight = target;
 });
 ipcMain.handle('get-scans-folder', () => scansFolder());
 ipcMain.on('open-site', () => {

@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('scannerAPI', {
   setStation: (station) => ipcRenderer.send('set-station', String(station || '')),
   getBounds: () => ipcRenderer.invoke('get-bounds'),
   resizeWindow: (width, height) => ipcRenderer.send('resize-window', { width, height }),
+  fitHeight: (height) => ipcRenderer.send('fit-height', height),
   
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)

@@ -12,11 +12,13 @@
     (function () {
       try {
         var saved = JSON.parse(localStorage.getItem('scanner.settings') || '{}').theme;
+        if (saved === 'morning') saved = 'light';
+        else if (saved === 'evening' || saved === 'night') saved = 'dark';
         var h = new Date().getHours();
-        var theme = saved || (h >= 6 && h < 16 ? 'morning' : h >= 16 && h < 20 ? 'evening' : 'night');
+        var theme = saved || (h >= 6 && h < 18 ? 'light' : 'dark');
         document.documentElement.dataset.theme = theme;
       } catch (e) {
-        document.documentElement.dataset.theme = 'night';
+        document.documentElement.dataset.theme = 'dark';
       }
     })();
   </script>
@@ -85,18 +87,52 @@
         </div>
         <div class="status-row">
           <span class="label">Station:</span>
-          <span class="value" id="stationName">—</span>
+          <input class="station-picker" id="stationInput" list="stationList" placeholder="Auto-detect" autocomplete="off" spellcheck="false">
+          <datalist id="stationList">
+            <option value="Seraphim Station"></option>
+            <option value="Orison"></option>
+            <option value="Area18"></option>
+            <option value="New Babbage"></option>
+            <option value="Lorville"></option>
+            <option value="Grim HEX"></option>
+            <option value="Port Tressler"></option>
+            <option value="Everus Harbor"></option>
+            <option value="Baijini Point"></option>
+            <option value="Checkmate"></option>
+            <option value="Ruin Station"></option>
+            <option value="Terra Gateway"></option>
+            <option value="Stanton Gateway"></option>
+            <option value="Nyx Gateway"></option>
+            <option value="Pyro Gateway"></option>
+            <option value="MIC-L1"></option>
+            <option value="ARC-L1"></option>
+            <option value="CRU-L1"></option>
+            <option value="HUR-L1"></option>
+            <option value="Orbituary"></option>
+            <option value="Megumi Refueling"></option>
+            <option value="Endgame"></option>
+            <option value="High Course"></option>
+            <option value="Shubin"></option>
+            <option value="HDMS"></option>
+            <option value="Rayari"></option>
+            <option value="Dumper's Depot"></option>
+          </datalist>
         </div>
       </section>
 
       <!-- Controls -->
-      <section class="card">
+      <section class="card" id="actionsCard">
         <div class="card-header">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="2" y="2" width="20" height="20" rx="2"/>
             <path d="M12 8v8M8 12h8"/>
           </svg>
           <h3>Actions</h3>
+          <button class="icon-btn card-toggle" data-panel="actions" title="Collapse panel">
+            <svg class="icon panel-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </button>
         </div>
         <div class="btn-group">
           <button class="btn btn-primary" id="scanBtn">
@@ -127,6 +163,11 @@
             <path d="M16 13H8M16 17H8M10 9h8"/>
           </svg>
           <h3>Last Scan Preview</h3>
+          <button class="icon-btn card-toggle" data-panel="preview" title="Collapse panel">
+            <svg class="icon panel-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </button>
         </div>
         <div class="preview-table" id="previewTable"></div>
         <div class="preview-actions">
@@ -136,12 +177,17 @@
       </section>
 
       <!-- Log console -->
-      <section class="card">
+      <section class="card" id="logCard">
         <div class="card-header">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4 19h16M4 15h16M10 11h6M10 7h6M4 3h16v16H4z"/>
           </svg>
           <h3>Activity Log</h3>
+          <button class="icon-btn card-toggle" data-panel="log" title="Collapse panel">
+            <svg class="icon panel-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </button>
         </div>
         <div class="log-console" id="logConsole"></div>
       </section>
@@ -161,51 +207,13 @@
         <div>
           <span class="setting-label">Appearance</span>
           <div class="theme-row" role="radiogroup" aria-label="Theme">
-            <button class="theme-chip" data-theme-choice="morning" type="button">
-              <span class="swatch morning"></span>Day
+            <button class="theme-chip" data-theme-choice="light" type="button">
+              <span class="swatch light"></span>Light
             </button>
-            <button class="theme-chip" data-theme-choice="evening" type="button">
-              <span class="swatch evening"></span>Evening
-            </button>
-            <button class="theme-chip" data-theme-choice="night" type="button">
-              <span class="swatch night"></span>Night
+            <button class="theme-chip" data-theme-choice="dark" type="button">
+              <span class="swatch dark"></span>Dark
             </button>
           </div>
-        </div>
-
-        <div>
-          <label class="setting-label" for="stationInput">Station</label>
-          <input class="setting-input" id="stationInput" list="stationList" placeholder="Auto-detect" autocomplete="off" spellcheck="false">
-          <datalist id="stationList">
-            <option value="Seraphim Station"></option>
-            <option value="Orison"></option>
-            <option value="Area18"></option>
-            <option value="New Babbage"></option>
-            <option value="Lorville"></option>
-            <option value="Grim HEX"></option>
-            <option value="Port Tressler"></option>
-            <option value="Everus Harbor"></option>
-            <option value="Baijini Point"></option>
-            <option value="Checkmate"></option>
-            <option value="Ruin Station"></option>
-            <option value="Terra Gateway"></option>
-            <option value="Stanton Gateway"></option>
-            <option value="Nyx Gateway"></option>
-            <option value="Pyro Gateway"></option>
-            <option value="MIC-L1"></option>
-            <option value="ARC-L1"></option>
-            <option value="CRU-L1"></option>
-            <option value="HUR-L1"></option>
-            <option value="Orbituary"></option>
-            <option value="Megumi Refueling"></option>
-            <option value="Endgame"></option>
-            <option value="High Course"></option>
-            <option value="Shubin"></option>
-            <option value="HDMS"></option>
-            <option value="Rayari"></option>
-            <option value="Dumper's Depot"></option>
-          </datalist>
-          <span class="setting-hint">Scans are saved under this station. Blank = try to detect from screen.</span>
         </div>
 
         <label class="setting-row">
