@@ -103,6 +103,27 @@ function createOverlayWindow() {
   overlayWindow.webContents.on('preload-error', (_e, preloadPath, error) => {
     toRenderer('scanner-log', `Preload error (${preloadPath}): ${error && error.message}`);
   });
+  overlayWindow.webContents.on('render-process-gone', (_e, details) => {
+    toRenderer('scanner-log', 'Renderer gone: ' + JSON.stringify(details));
+  });
+  overlayWindow.webContents.on('unresponsive', () => {
+    toRenderer('scanner-log', 'Renderer unresponsive');
+  });
+  overlayWindow.webContents.on('did-fail-load', (_e, code, desc) => {
+    toRenderer('scanner-log', `Load failed ${code}: ${desc}`);
+  });
+  if (process.env.SCANNER_DEBUG_DOM === '1') {
+    overlayWindow.webContents.on('did-finish-load', async () => {
+      try {
+        const info = await overlayWindow.webContents.executeJavaScript(
+          `({ ready: document.readyState, textLength: document.body.innerText.length, title: document.title })`
+        );
+        toRenderer('scanner-log', 'dom ' + JSON.stringify(info));
+      } catch (e) {
+        toRenderer('scanner-log', 'dom check failed: ' + e.message);
+      }
+    });
+  }
 
   // Optional UI self-test: SCANNER_SELFTEST=1 exercises settings/collapse/theme
   if (process.env.SCANNER_SELFTEST === '1') {
@@ -114,6 +135,8 @@ function createOverlayWindow() {
           const A = window.scannerAPI;
           const out = {};
           out.theme = document.documentElement.dataset.theme;
+          out.ready = document.readyState;
+          out.body = document.body.innerText.replace(/\s+/g, ' ').slice(0, 160);
           out.panelHidden = $('settingsPanel').hidden;
           $('settingsBtn').click();
           out.panelOpened = !$('settingsPanel').hidden;
