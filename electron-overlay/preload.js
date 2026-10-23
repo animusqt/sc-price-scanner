@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('scannerAPI', {
   setCollapsed: (collapsed) => ipcRenderer.send('set-collapsed', !!collapsed),
   setCloseToTray: (enabled) => ipcRenderer.send('set-close-to-tray', !!enabled),
   setLocked: (locked) => ipcRenderer.send('set-locked', !!locked),
+  setStation: (station) => ipcRenderer.send('set-station', String(station || '')),
   getBounds: () => ipcRenderer.invoke('get-bounds'),
   resizeWindow: (width, height) => ipcRenderer.send('resize-window', { width, height }),
   

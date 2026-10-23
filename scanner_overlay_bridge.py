@@ -67,6 +67,7 @@ else:
 
 calibrating = False
 calib_points = []
+STATION_OVERRIDE = ""
 
 
 def send(msg):
@@ -140,7 +141,9 @@ def do_scan():
         })
         return
 
-    station = sc_parser.detect_station(ocr_data) if ocr_data is not None else "Unknown Station"
+    station = STATION_OVERRIDE or (
+        sc_parser.detect_station(ocr_data) if ocr_data is not None else "Unknown Station"
+    )
     ts = int(time.time())
     merged_rows = sc_parser.merge_history(SCAN_DIR, station, rows, ts)
     scan = {
@@ -190,6 +193,7 @@ def start_calibration():
 
 
 def handle_stdin():
+    global STATION_OVERRIDE
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -203,6 +207,12 @@ def handle_stdin():
             do_scan()
         elif action == "calibrate":
             start_calibration()
+        elif action == "set_station":
+            STATION_OVERRIDE = str(cmd.get("station") or "").strip()
+            if STATION_OVERRIDE:
+                send({"type": "status", "message": f"Station set to {STATION_OVERRIDE}"})
+            else:
+                send({"type": "status", "message": "Station set to auto-detect"})
         elif action == "quit":
             send({"type": "status", "message": "Exiting"})
             os._exit(0)

@@ -7,6 +7,7 @@ let overlayWindow = null;
 let tray = null;
 let scannerProcess = null;
 let closeToTray = true;
+let stationOverride = '';
 let expandedHeight = 620;
 let isCollapsed = false;
 let isLocked = false;
@@ -199,9 +200,9 @@ function createTray() {
   });
 }
 
-function sendToScanner(action) {
+function sendToScanner(action, extra = {}) {
   if (scannerProcess && !scannerProcess.killed && scannerProcess.stdin.writable) {
-    scannerProcess.stdin.write(JSON.stringify({ action }) + '\n');
+    scannerProcess.stdin.write(JSON.stringify({ action, ...extra }) + '\n');
   }
 }
 
@@ -221,6 +222,8 @@ function launchScanner() {
       detached: false,
       windowsHide: true
     });
+
+    if (stationOverride) sendToScanner('set_station', { station: stationOverride });
 
     scannerProcess.on('error', (err) => {
       toRenderer('scanner-log', `Failed to launch scanner: ${err.message}`);
@@ -321,6 +324,10 @@ ipcMain.on('set-collapsed', (_, collapsedState) => {
 });
 ipcMain.on('trigger-scan', () => sendToScanner('scan'));
 ipcMain.on('trigger-calibrate', () => sendToScanner('calibrate'));
+ipcMain.on('set-station', (_, station) => {
+  stationOverride = String(station || '').trim();
+  sendToScanner('set_station', { station: stationOverride });
+});
 ipcMain.on('set-click-through', (_, enabled) => {
   if (overlayWindow) {
     overlayWindow.setIgnoreMouseEvents(enabled, { forward: true });

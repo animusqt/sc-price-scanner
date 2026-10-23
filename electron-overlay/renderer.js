@@ -30,6 +30,7 @@ const elements = {
   settingsOpenFolder: document.getElementById('settingsOpenFolder'),
   lockWindow: document.getElementById('lockWindow'),
   minToTray: document.getElementById('minToTray'),
+  stationInput: document.getElementById('stationInput'),
   themeChips: Array.from(document.querySelectorAll('[data-theme-choice]'))
 };
 
@@ -50,7 +51,7 @@ function init() {
    Settings
    ------------------------------------------------------------------ */
 const SETTINGS_KEY = 'scanner.settings';
-const DEFAULT_SETTINGS = { theme: null, locked: false, minToTray: true };
+const DEFAULT_SETTINGS = { theme: null, locked: false, minToTray: true, station: '' };
 let settings = { ...DEFAULT_SETTINGS, theme: null };
 let collapsed = false;
 
@@ -71,16 +72,19 @@ function initSettings() {
 
   elements.lockWindow.checked = !!settings.locked;
   elements.minToTray.checked = settings.minToTray !== false;
+  elements.stationInput.value = settings.station || '';
 
   applyTheme(settings.theme);
   applyLock(!!settings.locked);
   if (api.setCloseToTray) api.setCloseToTray(elements.minToTray.checked);
+  if (api.setStation) api.setStation(settings.station || '');
 }
 
 function saveSettings() {
   settings.theme = document.documentElement.dataset.theme || settings.theme;
   settings.locked = elements.lockWindow.checked;
   settings.minToTray = elements.minToTray.checked;
+  settings.station = elements.stationInput.value.trim();
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {}
@@ -137,6 +141,11 @@ function setupEventListeners() {
   });
   elements.minToTray.addEventListener('change', () => {
     if (api.setCloseToTray) api.setCloseToTray(elements.minToTray.checked);
+    saveSettings();
+  });
+  elements.stationInput.addEventListener('change', () => {
+    settings.station = elements.stationInput.value.trim();
+    if (api.setStation) api.setStation(settings.station);
     saveSettings();
   });
   
@@ -251,13 +260,7 @@ function updateScanPreview(scan) {
   // Build table
   const validRows = scan.commodities
     .filter(c => c.sell != null || c.buy != null)
-    .map(c => ({
-      ...c,
-      margin: (c.buy != null && c.sell != null && c.buy > 0)
-        ? (((c.sell - c.buy) / c.buy) * 100).toFixed(1)
-        : null
-    }))
-    .sort((a, b) => (parseFloat(b.margin) || -1e9) - (parseFloat(a.margin) || -1e9))
+    .sort((a, b) => String(a.commodity).localeCompare(String(b.commodity)))
     .slice(0, 15);
   
   if (validRows.length === 0) {
@@ -270,7 +273,6 @@ function updateScanPreview(scan) {
             <th>Commodity</th>
             <th class="right">Buy</th>
             <th class="right">Sell</th>
-            <th class="right margin">Margin</th>
             <th class="right">Stock</th>
             <th class="right">Demand</th>
           </tr>
@@ -281,7 +283,6 @@ function updateScanPreview(scan) {
               <td>${escapeHtml(c.commodity)}</td>
               <td class="right positive">${formatNumber(c.buy)}</td>
               <td class="right negative">${formatNumber(c.sell)}</td>
-              <td class="right margin">${c.margin != null ? c.margin + '%' : '-'}</td>
               <td class="right">${formatNumber(c.stock)}</td>
               <td class="right">${formatNumber(c.demand)}</td>
             </tr>

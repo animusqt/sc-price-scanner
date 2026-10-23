@@ -645,19 +645,25 @@ KNOWN_STATIONS = [
 
 
 def detect_station(ocr_data):
+    if not ocr_data:
+        return "Unknown Station"
     texts = [t.strip() for t in ocr_data.get("text", []) if t and t.strip()]
+    # Exact line match only. The trade popup contains words like "HIGH"
+    # (demand), which must never fuzzy-match "High Course".
     for t in texts:
         n = _norm(t)
         for k in KNOWN_STATIONS:
             if _norm(k) == n:
                 return k
+    # A full station name embedded in a longer line is safe; the reverse
+    # (short OCR token inside a station name) is what caused bad matches.
     for t in texts:
         n = _norm(t)
-        if len(n) < 4:
+        if len(n) < 6:
             continue
         for k in KNOWN_STATIONS:
             nk = _norm(k)
-            if len(nk) >= 4 and (nk in n or n in nk):
+            if len(nk) >= 6 and nk in n:
                 return k
     return "Unknown Station"
 
