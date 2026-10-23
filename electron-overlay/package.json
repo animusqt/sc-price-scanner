@@ -1,6 +1,6 @@
 {
   "name": "sc-price-scanner-overlay",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Always-on-top overlay for SC Price Scanner",
   "main": "main.js",
   "scripts": {

@@ -80,7 +80,7 @@ function createOverlayWindow() {
     height: 620,
     x: width - 360,
     y: 100,
-    icon: path.join(__dirname, 'icon.png'),
+    icon: loadAppIcon(),
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -240,17 +240,23 @@ function createOverlayWindow() {
   return overlayWindow;
 }
 
-function createTray() {
-  const iconPath = path.join(__dirname, 'icon.png');
-  let icon = nativeImage.createFromPath(iconPath);
-  if (icon.isEmpty()) {
-    icon = nativeImage.createFromPath(path.join(__dirname, 'icon.ico'));
+function loadAppIcon() {
+  const names = ['icon.png', 'icon.ico'];
+  for (const name of names) {
+    const p = path.join(__dirname, name);
+    try {
+      const img = nativeImage.createFromBuffer(fs.readFileSync(p));
+      if (!img.isEmpty()) return img;
+    } catch {}
+    const img = nativeImage.createFromPath(p);
+    if (!img.isEmpty()) return img;
   }
-  if (!icon.isEmpty()) {
-    icon = icon.resize({ width: 16, height: 16 });
-  }
+  return nativeImage.createEmpty();
+}
 
-  tray = new Tray(icon);
+function createTray() {
+  const icon = loadAppIcon();
+  tray = new Tray(icon.isEmpty() ? icon : (process.platform === 'win32' ? icon : icon.resize({ width: 16, height: 16 })));
   
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Show Overlay', click: () => overlayWindow?.show() },
