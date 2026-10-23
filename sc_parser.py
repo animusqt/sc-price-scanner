@@ -61,21 +61,71 @@ PLAIN_RE = re.compile(r"\d+")
 
 # Common Star Citizen commodities (used to clean up noisy OCR names)
 KNOWN_COMMODITIES = [
-    "Acrylic", "Agricium", "Agricultural Supplies", "Aluminium", "Ammonia",
-    "Aphorite", "Argon", "Astatine", "Astrocrete", "Beradom", "Beryl",
-    "Bexalite", "Borase", "Chlorine", "Compboard", "Construction Blocks",
-    "Copper", "Corundum", "Decari", "Diamond", "Distillates",
-    "Distilled Spirits", "Dolivine", "Energy", "Feynmaline", "Fluorine",
-    "Fresh Food", "Gasoline", "Glacosite", "Gold", "Hadanite",
-    "Hephaestanite", "Helium", "Hydrogen", "Inert Materials", "Iodine",
-    "Iridium", "Jaclium", "Janalite", "Laranite", "Lindinium",
-    "Liquid Fuel", "Medical Supplies", "Nitrogen", "Ouratite",
-    "Partillium", "Pressurized Ice", "Processed Food", "Quantanium",
-    "Quartz", "Recycled", "Recycled Material Composite", "Research",
-    "Salvage", "Savrilium", "Scrap", "Steel", "Stims", "Taranite",
-    "Tin", "Titanium", "Torite", "Tungsten", "Waste", "Xenon", "Zinc",
-    "RCM",
+    "AcryliPlex Composite", "Agricium", "Agricium (Ore)", "Agricultural Supplies",
+    "Altruciatoxin", "Aluminum", "Aluminum (Ore)", "Amioshi Plague", "Ammonia",
+    "Anti-Hydrogen", "Aphorite", "Apoxygenite", "Argon", "Arsenic", "Aslarite",
+    "Aslarite (Raw)", "Astatine", "Atacamite", "Atlasium", "Audio-Visual Equipment",
+    "Beradom", "Beryl", "Beryl (Raw)", "Bexalite", "Bexalite (Raw)", "Bioplastic",
+    "Blue Bilva", "Borase", "Borase (Ore)", "CK13-GID Seed Blend", "Cadmium Allinide",
+    "Caranite", "Caranite (Raw)", "Carbon", "Carbon-Silk", "Carinite",
+    "Carinite (Pure)", "Cave Kopion Horn", "Chlorine", "Coal", "Cobalt",
+    "Cobalt (Raw)", "Compboard", "Construction Material Pebbles",
+    "Construction Material Rubble", "Construction Material Salvage",
+    "Construction Materials", "Construction Pieces", "Copper", "Copper (Ore)",
+    "Corundum", "Corundum (Raw)", "Crude Oil", "CryoPod", "DCSR2", "Decari Pod",
+    "Degnous Root", "Detatrine", "Diamond", "Diamond (Raw)", "Diamond Laminate",
+    "Diluthermex", "Distilled Spirits", "Dolivine", "Dopple", "Dymantium", "DynaFlex",
+    "E'tam", "Elespo", "Feynmaline", "Fireworks", "Fluorine", "Freeze", "Fresh Food",
+    "Gasping Weevil Eggs", "Glacosite", "Glow", "Gold", "Gold (Ore)", "Golden Medmon",
+    "Hadanite", "Heart of the Woods", "Helium", "Hephaestanite", "Hephaestanite (Raw)",
+    "HexaPolyMesh Coating", "Human Food Bars", "Hydrogen", "Hydrogen Fuel",
+    "Ice (Raw)", "Inert Materials", "Iodine", "Iron", "Iron (Ore)",
+    "Irradiated Kopion Horn", "Jaclium", "Jaclium (Ore)", "Jahlium", "Janalite",
+    "Jumping Limes", "Kopion Horn", "Krypton", "Laranite", "Laranite (Raw)",
+    "Lastaphrene", "LifeCure Medsticks", "Lindinium", "Lindinium (Ore)",
+    "Luminalia Gift", "Lunes", "Lycara", "Magnesium", "Mala", "Marok Gem", "Maze",
+    "Medical Supplies", "Mercury", "Methane", "Molina Mold Samples",
+    "Molina Mold Treatment", "Molina Ventilation Filters", "Neograph", "Neon",
+    "Nitrogen", "Omnapoxy", "Organics", "Osoian Hides", "Ouratite", "Ouratite (Raw)",
+    "Partillium", "Party Favors", "Phosphorus", "Pitambu", "Potassium",
+    "Pressurized Ice", "Processed Food", "Prota", "Quantainium", "Quantainium (Raw)",
+    "Quantum Fuel", "Quartz", "Quartz (Raw)", "Ranta Dung",
+    "Recycled Material Composite", "Redfin Energy Modulators", "Revenant Pod",
+    "Revenant Tree Pollen", "Riccite", "Riccite (Ore)", "SLAM", "Sadaryx",
+    "Sadaryx (Raw)", "Saldynium (Ore)", "Sarilus", "Savrilium", "Savrilium (Ore)",
+    "Scrap", "Selenium", "Ship Ammunition", "Ship Ammunition - Size 1",
+    "Ship Ammunition - Size 2", "Ship Ammunition - Size 3", "Ship Ammunition - Size 4",
+    "Ship Ammunition - Size 5", "Ship Ammunition - Size 6", "Ship Ammunition - Size 7",
+    "Ship Decoy Countermeasures", "Ship Noise Countermeasures", "Silicon",
+    "Silicon (Raw)", "Silnex", "Souvenirs", "Steel", "Stileron", "Stileron (Raw)",
+    "Stims", "Stone Bug Shell", "Sunset Berries", "Taranite", "Taranite (Raw)",
+    "Tellurium", "Thermalfoam", "Thrust", "Tin", "Tin (Ore)", "Titanium",
+    "Titanium (Ore)", "Torite", "Torite (Ore)", "Tritium", "Tundra Kopion Horn",
+    "Tungsten", "Tungsten (Ore)", "Waste", "WiDoW", "Wuotan Seed", "Xa'Pyen", "Xenon",
+    "Year of the Dog Envelope", "Year of the Monkey Envelope",
+    "Year of the Pig Envelope", "Year of the Rat Envelope",
+    "Year of the Rooster Envelope", "Zeta-Prolanide", "Zip"
 ]
+
+# Names that differ between the game and the SC-Truckers / UEX market list
+COMMODITY_ALIASES = {
+    "aluminium": "Aluminum",
+    "quantanium": "Quantainium",
+    "rcm": "Recycled Material Composite",
+    "recycledmaterial": "Recycled Material Composite",
+    "hydrogenfuel": "Hydrogen Fuel",
+    "quantumfuel": "Quantum Fuel",
+    "vaste": "Waste",
+    "eluorine": "Fluorine",
+}
+
+_COMMODITY_INDEX = {}
+_COMMODITY_BY_NORM = {}
+for _c in KNOWN_COMMODITIES:
+    _cn = re.sub(r"[^a-z]", "", _c.lower())
+    _COMMODITY_INDEX[_cn] = _c
+    _COMMODITY_BY_NORM.setdefault(_cn, _c)
+_COMMODITY_NORMS = list(_COMMODITY_BY_NORM.keys())
 
 # Letter -> digit confusions common in game/pixel fonts
 CONFUSABLE = str.maketrans({
@@ -118,20 +168,54 @@ def _digits_only(text):
     return t
 
 
+_UI_WORDS = (
+    "inventory", "quantity", "ventory", "available", "transaction",
+    "shop", "stock", "units", "unit", "cargo", "demand", "please",
+    "select", "valid", "make", "high", "very", "medium", "low", "max", "wax",
+)
+
+
+def _strip_ui(norm):
+    for w in _UI_WORDS:
+        norm = norm.replace(w, "")
+    return norm
+
+
 def canonical_commodity(name):
-    """Fuzzy-map a noisy OCR name onto a known commodity, else None."""
+    """Fuzzy-map a noisy OCR name onto the SC-Truckers commodity list, else None."""
     if not name:
         return None
     norm = re.sub(r"[^a-z]", "", str(name).lower())
     if not norm:
         return None
+    if norm in COMMODITY_ALIASES:
+        return COMMODITY_ALIASES[norm]
+    if norm in _COMMODITY_INDEX:
+        return _COMMODITY_INDEX[norm]
+    # Card titles often fuse a UI label with the name: "WAXCHLORINEINVENTORY".
+    stripped = _strip_ui(norm)
+    if stripped in _COMMODITY_INDEX:
+        return _COMMODITY_INDEX[stripped]
+    if stripped in COMMODITY_ALIASES:
+        return COMMODITY_ALIASES[stripped]
+    # A known name may be embedded in a noisy token, but only small OCR noise
+    # may surround it ("CHLORINE12" ok; "tejncorunaluminumrnventory" not).
     best = None
-    for c in KNOWN_COMMODITIES:
-        cn = re.sub(r"[^a-z]", "", c.lower())
-        if cn and cn in norm:
-            if best is None or len(cn) > len(best[1]):
-                best = (c, cn)
-    return best[0] if best else None
+    best_len = 0
+    for cn, c in _COMMODITY_BY_NORM.items():
+        if len(cn) < 4:
+            continue
+        idx = stripped.find(cn)
+        if idx < 0:
+            continue
+        pre = stripped[:idx]
+        suf = stripped[idx + len(cn):]
+        if len(pre) > 5 or len(suf) > 5:
+            continue
+        if len(cn) > best_len:
+            best = c
+            best_len = len(cn)
+    return best
 
 
 def _to_int(text):
@@ -265,25 +349,33 @@ def _stock_from_header(joined):
     return v if v and 0 < v < 1_000_000 else None
 
 
-def parse_modal(lines):
+def parse_modal(lines, tab=None, min_x=0):
     results = []
     n = len(lines)
 
     for i, line in enumerate(lines):
-        joined = " ".join(s["text"] for s in line["segments"]).lower()
+        segs = [s for s in line["segments"] if s["x_center"] >= min_x]
+        joined = " ".join(s["text"] for s in segs).lower()
         if "shop" not in joined or "quantity" not in joined:
             continue
 
-        # Commodity name: fuzzy-match any segment on the header line
+        # Commodity name: fuzzy-match any segment on the card line
         name = None
-        for s in line["segments"]:
+        for s in segs:
             c = canonical_commodity(s["text"])
             if c:
                 name = c
                 break
+        if not name and i > 0:
+            prev_segs = [s for s in lines[i - 1]["segments"] if s["x_center"] >= min_x]
+            for s in prev_segs:
+                c = canonical_commodity(s["text"])
+                if c:
+                    name = c
+                    break
         if not name:
             # Unknown commodity: accept a clean title/uppercase label on the card
-            for s in line["segments"]:
+            for s in segs:
                 t = s["text"].strip()
                 if not re.fullmatch(r"[A-Z][A-Za-z'&.\- ]{2,28}", t):
                     continue
@@ -298,23 +390,28 @@ def parse_modal(lines):
         if not name:
             continue
 
-        stock = _stock_from_header(" ".join(s["text"] for s in line["segments"]))
+        header = " ".join(s["text"] for s in segs)
+        stock = _stock_from_header(header)
         price = None
+        demand_label = None
 
         for j in range(i, min(i + 6, n)):
-            ltxt = " ".join(s["text"] for s in lines[j]["segments"])
+            lsegs = [s for s in lines[j]["segments"] if s["x_center"] >= min_x]
+            ltxt = " ".join(s["text"] for s in lsegs)
             low = ltxt.lower()
 
             if j > i and "shop" in low and "quantity" in low:
                 break  # next card started
 
-            for s in lines[j]["segments"]:
+            for s in lsegs:
                 stxt = s["text"]
                 slow = stxt.lower()
 
-                # Price token: has a slash-unit suffix
-                if ("/unit" in slow or "/scu" in slow or "/uec" in slow) and _has_digit(stxt):
-                    v = _to_int(stxt)
+                # Price token: number followed by a slash-unit suffix (SCU is
+                # often misread as 8CU/5CU in the game font).
+                m = re.search(r"(\d[\d,\.\s]{0,12})/\s*(?:scu|8cu|5cu|units?|uec)", slow)
+                if m and _has_digit(m.group(1)):
+                    v = _to_int(m.group(1))
                     if v:
                         price = v
                     continue
@@ -326,14 +423,27 @@ def parse_modal(lines):
                         if v and 0 < v < 1_000_000:
                             stock = v
 
-        results.append({
+                if demand_label is None:
+                    nl = _norm(stxt)
+                    if any(k in nl for k in ("indemand", "nodemand", "cannotsell")):
+                        demand_label = stxt.strip()
+
+        row = {
             "commodity": name,
             "buy": None,
-            "sell": price,
+            "sell": None,
             "stock": stock,
             "demand": None,
             "layout": "modal",
-        })
+        }
+        if price is not None:
+            if tab == "sell" or (tab is None and demand_label):
+                row["sell"] = price
+            else:
+                row["buy"] = price
+        if demand_label:
+            row["demand_label"] = demand_label
+        results.append(row)
 
     return results
 
@@ -357,7 +467,7 @@ def find_header(lines):
     return None
 
 
-def parse_table(lines, header_cols):
+def parse_table(lines, header_cols, min_x=0):
     kinds = [k for k, _ in header_cols]
     xs = [x for _, x in header_cols]
 
@@ -377,6 +487,8 @@ def parse_table(lines, header_cols):
         values = {}
 
         for s in line["segments"]:
+            if s["x_center"] < min_x:
+                continue
             band = kinds[-1]
             if len(xs) > 1:
                 band = kinds[-1]
@@ -422,12 +534,14 @@ def parse_table(lines, header_cols):
 # ------------------------------------------------------------------
 # Fallback positional
 # ------------------------------------------------------------------
-def parse_fallback(lines):
+def parse_fallback(lines, min_x=0):
     results = []
     for line in lines:
         name = None
         nums = []
         for s in line["segments"]:
+            if s["x_center"] < min_x:
+                continue
             if _has_digit(s["text"]) and re.fullmatch(r"[\d.,\s/]+[A-Za-z]{0,3}", s["text"].strip()):
                 v = _to_int(s["text"])
                 if v is not None:
@@ -450,25 +564,79 @@ def parse_fallback(lines):
 # ------------------------------------------------------------------
 # Public API
 # ------------------------------------------------------------------
-def parse_commodities(ocr_data, image=None):
+def _detect_tab(lines, color_image=None, proc_w=None, proc_h=None, right_min=0):
+    """Return 'buy', 'sell' or None for the kiosk tab that was scanned."""
+    if not lines:
+        return None
+    texts = []
+    for line in lines:
+        for s in line["segments"]:
+            n = _norm(s["text"])
+            if n:
+                texts.append((s, n))
+    # Prefer the row labels on the right-hand commodity list. The BUY tab shows
+    # inventory levels ("MAX INVENTORY"), the LOCAL MARKET VALUE tab shows
+    # demand ("IN DEMAND" / "NO DEMAND" / "CANNOT SELL").
+    right = [n for s, n in texts if s["x_center"] >= right_min]
+    joined = " ".join(right)
+    if "demand" in joined:
+        return "sell"
+    if "inventory" in joined:
+        return "buy"
+
+    # Fallback: compare the tab label backgrounds (the active tab is filled).
+    if color_image is None or not proc_w or not proc_h:
+        return None
+    scale = proc_w / float(color_image.shape[1])
+    heights = {}
+    for s, n in texts:
+        if s["y_center"] > 0.18 * proc_h:
+            continue
+        kind = None
+        if n == "buy":
+            kind = "buy"
+        elif "local" in n and "value" in n:
+            kind = "sell"
+        if kind is None:
+            continue
+        x1 = max(0, int(s["x"] / scale))
+        y1 = max(0, int(s["y"] / scale))
+        x2 = min(color_image.shape[1], int((s["x"] + s["w"]) / scale))
+        y2 = min(color_image.shape[0], int((s["y"] + s["h"]) / scale))
+        patch = color_image[y1:y2, x1:x2]
+        if patch.size:
+            heights[kind] = max(heights.get(kind, 0.0), float(patch.mean()))
+    if len(heights) == 2 and abs(heights["buy"] - heights["sell"]) >= 6:
+        return "buy" if heights["buy"] > heights["sell"] else "sell"
+    return None
+
+
+def parse_commodities(ocr_data, image=None, color_image=None):
     lines = group_lines(ocr_data)
     if not lines:
         return {"rows": [], "layout": "unknown", "headers": []}
 
-    modal_rows = parse_modal(lines)
+    proc_w = image.shape[1] if image is not None else None
+    proc_h = image.shape[0] if image is not None else None
+    joined_all = " ".join(_norm(s["text"]) for line in lines for s in line["segments"])
+    has_left = "selectlocation" in joined_all
+    min_x = 0.45 * proc_w if (has_left and proc_w) else 0
+    tab = _detect_tab(lines, color_image, proc_w, proc_h, right_min=min_x)
+
+    modal_rows = parse_modal(lines, tab=tab, min_x=min_x)
     header_cols = find_header(lines)
-    table_rows = parse_table(lines, header_cols) if header_cols else []
+    table_rows = parse_table(lines, header_cols, min_x=min_x) if header_cols else []
 
     if table_rows and len(table_rows) >= len(modal_rows):
-        return {"rows": table_rows, "layout": "table", "headers": header_cols}
+        return {"rows": table_rows, "layout": "table", "headers": header_cols, "tab": tab}
     if modal_rows:
-        return {"rows": modal_rows, "layout": "modal", "headers": []}
+        return {"rows": modal_rows, "layout": "modal", "headers": [], "tab": tab}
 
-    fallback = parse_fallback(lines)
+    fallback = parse_fallback(lines, min_x=min_x)
     if fallback:
-        return {"rows": fallback, "layout": "guessed", "headers": []}
+        return {"rows": fallback, "layout": "guessed", "headers": [], "tab": tab}
 
-    return {"rows": [], "layout": "unknown", "headers": []}
+    return {"rows": [], "layout": "unknown", "headers": [], "tab": tab}
 
 
 # ------------------------------------------------------------------
@@ -508,21 +676,20 @@ def _merge_results(collected):
             for r in parsed["rows"]:
                 key = canonical_commodity(r.get("commodity"))
                 if key is None:
-                    if not is_guessed and _name_is_clean(r.get("commodity")):
-                        key = r["commodity"].strip().title()
-                    else:
-                        continue
+                    continue
                 b = buckets.setdefault(key, {
                     "commodity": key,
                     "layout": parsed["layout"],
                     "best_score": score,
-                    "buy": [], "sell": [], "stock": [], "demand": [],
+                    "buy": [], "sell": [], "stock": [], "demand": [], "label": [],
                 })
                 b["best_score"] = max(b["best_score"], score)
                 for f in ("buy", "sell", "stock", "demand"):
                     v = r.get(f)
                     if v is not None:
                         b[f].append((v, score))
+                if r.get("demand_label"):
+                    b["label"].append((r["demand_label"], score))
         return buckets
 
     buckets = build(allow_guessed=False) or build(allow_guessed=True)
@@ -542,14 +709,107 @@ def _merge_results(collected):
                 counts,
                 key=lambda v: (counts[v], max(s for vv, s in vals if vv == v)),
             )
+        if b["label"]:
+            counts = {}
+            for v, s in b["label"]:
+                counts[v] = counts.get(v, 0) + 1
+            row["demand_label"] = max(
+                counts,
+                key=lambda v: (counts[v], max(s for vv, s in b["label"] if vv == v)),
+            )
         rows.append((b["best_score"], row))
 
     rows.sort(key=lambda t: (-t[0], t[1]["commodity"]))
     return [r for _, r in rows]
 
 
+def parse_inventory(lines, color_image=None, proc_w=None):
+    """Read the left-hand YOUR INVENTORIES list (ship cargo) and profit arrows."""
+    if not lines or not proc_w:
+        return []
+    left_max = 0.45 * proc_w
+    items = {}
+    scale = proc_w / float(color_image.shape[1]) if color_image is not None else 1.0
+
+    for line in lines:
+        segs = [s for s in line["segments"] if s["x_center"] < left_max]
+        if not segs:
+            continue
+        joined = " ".join(s["text"] for s in segs)
+        name = None
+        for s in segs:
+            c = canonical_commodity(s["text"])
+            if c:
+                name = c
+                break
+        if not name:
+            continue
+
+        m = re.search(r"([\d][\d,\.\s]{0,12}?)\s*(?:scu|units?)", joined, re.I)
+        qty = _to_int(m.group(1)) if m else None
+        if qty is None:
+            for s in segs:
+                if "scu" in s["text"].lower() and _has_digit(s["text"]):
+                    v = _to_int(s["text"])
+                    if v:
+                        qty = v
+                        break
+        if not qty or qty <= 0:
+            continue
+
+        arrow = None
+        if color_image is not None:
+            x1 = int(min(s["x"] for s in segs) / scale)
+            x2 = int(max(s["x"] + s["w"] for s in segs) / scale)
+            y1 = int(min(s["y"] for s in segs) / scale)
+            y2 = int(max(s["y"] + s["h"] for s in segs) / scale)
+            patch = color_image[max(0, y1):max(0, y2), max(0, x1):max(0, x2)]
+            if patch.size:
+                hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+                h, sat, val = cv2.split(hsv)
+                green = int(np.count_nonzero((h >= 40) & (h <= 95) & (sat >= 60) & (val >= 50)))
+                red = int(np.count_nonzero(((h <= 10) | (h >= 170)) & (sat >= 60) & (val >= 50)))
+                if max(green, red) >= 8 and abs(green - red) >= 3:
+                    arrow = "up" if green > red else "down"
+
+        prev = items.get(name)
+        if prev is None:
+            items[name] = {"commodity": name, "quantity": qty, "profit": arrow}
+        else:
+            prev["quantity"] = max(prev["quantity"], qty)
+            if prev.get("profit") is None and arrow:
+                prev["profit"] = arrow
+
+    return sorted(items.values(), key=lambda r: r["commodity"])
+
+
+def _probe_left_panel(img):
+    """Quick low-cost pass to see if the capture includes YOUR INVENTORIES."""
+    try:
+        processed = preprocess(img, max_dim=2400)["otsu_inv"]
+        data = pytesseract.image_to_data(
+            processed, output_type=pytesseract.Output.DICT, config="--oem 3 --psm 6"
+        )
+    except Exception:
+        return None
+    txt = re.sub(r"[^a-z]", "", " ".join(data.get("text") or []).lower())
+    if "selectlocation" in txt:
+        return data, processed
+    return None
+
+
 def run_ocr(img):
     """Run many preprocessing/PSM passes and vote on the most reliable values."""
+    inventory = []
+    probe = _probe_left_panel(img)
+    if probe is not None:
+        probe_data, probe_img = probe
+        inventory = parse_inventory(
+            group_lines(probe_data), color_image=img, proc_w=probe_img.shape[1]
+        )
+        # OCR the commodity list only: the inventories column confuses layout.
+        img = img[:, int(0.45 * img.shape[1]):]
+
     variants = preprocess(img)
     # 2 preprocessors x 2 layouts is enough for reliable voting and keeps a scan
     # under ~3s. The old adaptive/psm-11 passes were ~30x slower for no gain.
@@ -561,6 +821,8 @@ def run_ocr(img):
     layout_scores = {}
     best_data = None
     best_score = None
+    best_processed = None
+    best_parsed = None
     for vname, processed in variants.items():
         for cfg in configs:
             try:
@@ -569,12 +831,12 @@ def run_ocr(img):
                 )
             except Exception:
                 continue
-            parsed = parse_commodities(data, image=processed)
+            parsed = parse_commodities(data, image=processed, color_image=img)
             score = layout_bonus.get(parsed["layout"], 0)
             for r in parsed["rows"]:
                 if r.get("sell") or r.get("buy"):
                     score += 10
-                if canonical_commodity(r.get("commodity")) or _name_is_clean(r.get("commodity")):
+                if canonical_commodity(r.get("commodity")):
                     score += 6
                 if r.get("stock"):
                     score += 4
@@ -584,6 +846,8 @@ def run_ocr(img):
             if best_score is None or score > best_score:
                 best_score = score
                 best_data = data
+                best_processed = processed
+                best_parsed = parsed
 
     if not collected:
         return None, {"rows": [], "layout": "unknown"}, "none"
@@ -592,7 +856,19 @@ def run_ocr(img):
     layout = "table" if any(r["layout"] == "table" for r in rows) else (
         "modal" if any(r["layout"] == "modal" for r in rows) else "unknown"
     )
-    return best_data, {"rows": rows, "layout": layout, "headers": []}, "merged"
+    tab = best_parsed.get("tab") if best_parsed else None
+    inventory = []
+    if probe is None and best_data is not None and best_processed is not None:
+        inventory = parse_inventory(
+            group_lines(best_data), color_image=img, proc_w=best_processed.shape[1]
+        )
+    return best_data, {
+        "rows": rows,
+        "layout": layout,
+        "headers": [],
+        "inventory": inventory,
+        "tab": tab,
+    }, "merged"
 
 
 def annotate(image, ocr_data):
@@ -687,17 +963,40 @@ def merge_history(scan_dir, station, rows, ts):
     except Exception:
         pass
 
+    if loaded_ok:
+        # Drop junk left behind by older fuzzy matching and merge duplicates.
+        for st in hist["stations"].values():
+            if not isinstance(st, dict):
+                continue
+            comms = st.get("commodities")
+            if not isinstance(comms, dict):
+                st["commodities"] = {}
+                continue
+            clean = {}
+            for name, entry in comms.items():
+                canon = canonical_commodity(name)
+                if not canon or not isinstance(entry, dict):
+                    continue
+                prev = clean.get(canon)
+                if prev is None or (entry.get("scanned_at") or 0) >= (prev.get("scanned_at") or 0):
+                    clean[canon] = entry
+            st["commodities"] = clean
+
     def upsert(st, items, when):
         for row in items:
             name = (row.get("commodity") or "").strip()
             if not name:
                 continue
-            key = canonical_commodity(name) or name
+            key = canonical_commodity(name)
+            if not key:
+                continue
             entry = st["commodities"].setdefault(key, {})
             for field in ("buy", "sell", "stock", "demand"):
                 value = row.get(field)
                 if value is not None:
                     entry[field] = value
+            if row.get("demand_label"):
+                entry["demand_label"] = row["demand_label"]
             entry["scanned_at"] = int(when)
 
     # First run: seed from every scan JSON already in the folder
@@ -738,6 +1037,7 @@ def merge_history(scan_dir, station, rows, ts):
             "sell": entry.get("sell"),
             "stock": entry.get("stock"),
             "demand": entry.get("demand"),
+            "demand_label": entry.get("demand_label"),
             "scanned_at": entry.get("scanned_at"),
         })
     return merged

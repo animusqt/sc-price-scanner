@@ -400,6 +400,60 @@ body {
 .preview-table td.negative { color: var(--danger); }
 .preview-table td.margin { color: var(--warning); font-weight: 600; }
 
+.preview-cargo {
+  padding: 0 12px;
+}
+
+.preview-cargo:empty {
+  display: none;
+}
+
+.cargo-title {
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.cargo-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cargo-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.cargo-name {
+  flex: 1;
+  color: var(--fg);
+}
+
+.cargo-qty {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.cargo-arrow {
+  width: 12px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.cargo-arrow.up { color: var(--success); }
+.cargo-arrow.down { color: var(--danger); }
+
 .preview-actions {
   display: flex;
   gap: 8px;

@@ -17,6 +17,7 @@ const elements = {
   closeBtn: document.getElementById('closeBtn'),
   previewCard: document.getElementById('previewCard'),
   previewTable: document.getElementById('previewTable'),
+  previewCargo: document.getElementById('previewCargo'),
   openScanFolder: document.getElementById('openScanFolder'),
   uploadToSite: document.getElementById('uploadToSite'),
   logConsole: document.getElementById('logConsole'),
@@ -337,14 +338,31 @@ function updateScanPreview(scan) {
               <td class="right positive">${formatNumber(c.buy)}</td>
               <td class="right negative">${formatNumber(c.sell)}</td>
               <td class="right">${formatNumber(c.stock)}</td>
-              <td class="right">${formatNumber(c.demand)}</td>
+              <td class="right">${escapeHtml(c.demand_label || formatNumber(c.demand))}</td>
             </tr>
           `).join('')}
         </tbody>
       </table>
     `;
   }
-  
+
+  const cargo = Array.isArray(scan.inventory) ? scan.inventory : [];
+  if (elements.previewCargo) {
+    elements.previewCargo.innerHTML = cargo.length === 0 ? '' : `
+      <div class="cargo-title">Ship cargo</div>
+      <ul class="cargo-list">
+        ${cargo.map(item => {
+          const arrow = item.profit === 'up' ? '\u2191' : item.profit === 'down' ? '\u2193' : '';
+          return `<li>
+            <span class="cargo-name">${escapeHtml(item.commodity)}</span>
+            <span class="cargo-qty">${formatNumber(item.quantity)} SCU</span>
+            <span class="cargo-arrow ${item.profit === 'up' ? 'up' : item.profit === 'down' ? 'down' : ''}">${arrow}</span>
+          </li>`;
+        }).join('')}
+      </ul>
+    `;
+  }
+
   elements.previewCard.style.display = 'block';
   scheduleFit();
 }

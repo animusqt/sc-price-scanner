@@ -127,15 +127,34 @@ function createOverlayWindow() {
           out.resized = !!after && after.width === 480 && after.height === 520;
           A.resizeWindow(before.width, before.height);
           await new Promise((r) => setTimeout(r, 150));
+          updateScanPreview({ timestamp: Math.floor(Date.now() / 1000), station: 'Test Station', commodities: [
+            { commodity: 'Chlorine', buy: 1162, sell: null, stock: 6000, demand: null },
+            { commodity: 'Copper', buy: 3198, sell: null, stock: 1992, demand: null },
+            { commodity: 'Fluorine', buy: 1090, sell: null, stock: 5316, demand: null },
+            { commodity: 'Helium', buy: 4772, sell: null, stock: 1427, demand: null },
+            { commodity: 'Hydrogen', buy: 800, sell: null, stock: 6847, demand: null },
+            { commodity: 'Scrap', buy: 3109, sell: null, stock: 2100, demand: null },
+            { commodity: 'Waste', buy: null, sell: 813, stock: 8000, demand: null }
+          ], inventory: [
+            { commodity: 'Waste', quantity: 8000, profit: 'down' },
+            { commodity: 'Scrap', quantity: 1820, profit: 'up' }
+          ] });
+          await new Promise((r) => setTimeout(r, 500));
+          out.previewRows = document.querySelectorAll('#previewTable tbody tr').length;
+          out.cargoRows = document.querySelectorAll('#previewCargo .cargo-list li').length;
           out.panelCount = document.querySelectorAll('.card-toggle').length;
+          const previewBtn = document.querySelector('[data-panel="preview"]');
           const logBtn = document.querySelector('[data-panel="log"]');
           const startH = (await A.getBounds()).height;
+          previewBtn.click();
           logBtn.click();
-          await new Promise((r) => setTimeout(r, 400));
+          await new Promise((r) => setTimeout(r, 500));
           out.logCollapsed = $('logCard').classList.contains('panel-collapsed');
+          out.previewCollapsed = $('previewCard').classList.contains('panel-collapsed');
           const collapsedH = (await A.getBounds()).height;
+          previewBtn.click();
           logBtn.click();
-          await new Promise((r) => setTimeout(r, 400));
+          await new Promise((r) => setTimeout(r, 500));
           const expandedH = (await A.getBounds()).height;
           out.panelShrinksWindow = collapsedH < startH && expandedH > collapsedH;
           $('minimizeBtn').click();
@@ -153,6 +172,16 @@ function createOverlayWindow() {
           return JSON.stringify(out);
         })()`);
         toRenderer('scanner-log', 'selftest ' + result);
+        const sb = overlayWindow.getBounds();
+        const { workArea: wa } = screen.getDisplayMatching(sb);
+        toRenderer('scanner-log', 'selftest-bounds ' + JSON.stringify({
+          width: sb.width,
+          height: sb.height,
+          x: sb.x,
+          y: sb.y,
+          fits: sb.y + sb.height <= wa.y + wa.height,
+          workArea: wa,
+        }));
       } catch (e) {
         toRenderer('scanner-log', 'selftest failed: ' + e.message);
       }
@@ -363,7 +392,12 @@ ipcMain.on('fit-height', (_, height) => {
   const b = overlayWindow.getBounds();
   const target = Math.max(120, Math.min(1000, Math.round(height)));
   if (Math.abs(b.height - target) < 2) return;
-  overlayWindow.setBounds({ x: b.x, y: b.y, width: b.width, height: target });
+  const { workArea } = screen.getDisplayMatching(b);
+  let y = b.y;
+  if (y + target > workArea.y + workArea.height) {
+    y = Math.max(workArea.y, workArea.y + workArea.height - target);
+  }
+  overlayWindow.setBounds({ x: b.x, y, width: b.width, height: target });
   expandedHeight = target;
 });
 ipcMain.handle('get-scans-folder', () => scansFolder());

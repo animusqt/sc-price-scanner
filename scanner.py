@@ -167,7 +167,9 @@ def do_scan():
         "timestamp": ts,
         "station": station,
         "commodities": merged_rows,
+        "inventory": parsed.get("inventory") or [],
         "layout": layout,
+        "tab": parsed.get("tab"),
         "source": "player-scan",
         "version": "1.1",
     }
