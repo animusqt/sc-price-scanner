@@ -157,8 +157,7 @@ def do_scan():
         "source": "player-scan",
         "version": "1.1",
     }
-    safe_station = "".join(c if c.isalnum() else "-" for c in station).strip("-")[:40] or "Unknown"
-    out_path = SCAN_DIR / f"{safe_station}_{stamp}.json"
+    out_path = sc_parser.station_scan_path(SCAN_DIR, station)
     out_path.write_text(json.dumps(scan, indent=2))
     send({"type": "status", "message": f"Saved {out_path.name}: {len(rows)} new / {len(merged_rows)} known"})
     send({"type": "scan_complete", "payload": scan, "file": str(out_path)})

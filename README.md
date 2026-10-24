@@ -8,7 +8,7 @@ The scanner bridge must also be built before the overlay can scan. The launcher 
 
 Closing the overlay window hides it to the system tray; choose **Quit** from the tray menu to exit completely.
 
-In the overlay, choose **Calibrate Region** and click the scan area's top-left corner. A highlighted box follows your cursor; click the bottom-right corner to save the region. Press **Esc** to cancel. Then open a commodity kiosk and choose **Scan Terminal**. Scan files are saved under `Documents\SC-Truckers Scans\`.
+In the overlay, choose **Calibrate Region** and click the scan area's top-left corner. A highlighted box follows your cursor; click the bottom-right corner to save the region. Press **Esc** to cancel. Then open a commodity kiosk and choose **Scan Terminal**. Each station gets one JSON file under `Documents\SC-Truckers Scans\`; scanning it again updates that same file with new commodities and newer values, without duplicate commodity rows. If the station is shown as **Unknown Station**, set its name in the station field so it is saved to the correct station file.
 
 ---
 

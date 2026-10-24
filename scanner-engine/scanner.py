@@ -173,8 +173,7 @@ def do_scan():
         "source": "player-scan",
         "version": "1.1",
     }
-    safe_station = "".join(c if c.isalnum() else "-" for c in station).strip("-")[:40] or "Unknown"
-    out = SCAN_DIR / f"{safe_station}_{stamp}.json"
+    out = sc_parser.station_scan_path(SCAN_DIR, station)
     out.write_text(json.dumps(scan, indent=2))
 
     log(f"[OK] {len(rows)} new / {len(merged_rows)} known commodities ({layout}) from {station} -> {out.name}")

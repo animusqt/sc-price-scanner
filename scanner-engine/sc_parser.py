@@ -943,6 +943,14 @@ def detect_station(ocr_data):
                 return k
     return "Unknown Station"
 
+
+def station_scan_path(scan_dir, station):
+    safe_station = "".join(
+        c if c.isalnum() else "-" for c in station
+    ).strip("-")[:40] or "Unknown"
+    return Path(scan_dir) / f"{safe_station}.json"
+
+
 # ------------------------------------------------------------------
 # Scan history (remember every scan, merged per station)
 # ------------------------------------------------------------------

@@ -31,7 +31,7 @@ sc_price_scanner/
 ### 1. **CLI Scanner** (`scanner-engine/scanner.py` → `SC-Price-Scanner.exe`)
 - **Standalone, zero dependencies** — runs on any Windows PC
 - **Hotkeys:** F8=calibrate region, F9=scan terminal, F10=quit
-- **Output:** JSON files in `Documents\SC-Truckers Scans\<Station>_<timestamp>.json`
+- **Output:** One cumulative JSON file per station in `Documents\SC-Truckers Scans\<Station>.json`
 - **Safety:** Screen capture only (DXGI Desktop Duplication), no game injection
 
 ### 2. **Overlay Bridge** (`scanner-engine/scanner_overlay_bridge.py` → `SC-Price-Scanner-Bridge.exe`)
