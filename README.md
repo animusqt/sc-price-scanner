@@ -10,6 +10,8 @@ Closing the overlay window hides it to the system tray; choose **Quit** from the
 
 In the overlay, choose **Calibrate Region** and click the scan area's top-left corner. A highlighted box follows your cursor; click the bottom-right corner to save the region. Press **Esc** to cancel. Then open a commodity kiosk and choose **Scan Terminal**. Each station gets one JSON file under `Documents\SC-Truckers Scans\`; scanning it again updates that same file with new commodities and newer values, without duplicate commodity rows. If the station is shown as **Unknown Station**, set its name in the station field so it is saved to the correct station file.
 
+For hands-free updates, choose **Start Low-Impact Live Scan**. It checks the calibrated region every 2 seconds and runs OCR only after a visual change remains stable; scans are limited to one every 15 seconds. Manual **F9** scanning remains available. OCR values need agreement across multiple passes, and unconfirmed market tabs are not used for modal prices. Review warnings and the files in **Open Scan Diagnostics** before submitting scans to a market site. The scanner creates local player-scan JSON; it does not automatically upload or verify submissions.
+
 ---
 
 ## Build the scanner
@@ -25,6 +27,8 @@ winget install UB-Mannheim.TesseractOCR
 ```
 
 ### Build
+Close all running scanner overlays before rebuilding; Windows locks the bridge executable while it is running.
+
 ```bash
 python scanner-engine\build_scanner.py
 ```
@@ -64,7 +68,7 @@ Add `electron-updater` style checks or simple version JSON on your CDN.
 | **Ban risk** | Near-zero. Uses Windows Desktop Duplication API (same as OBS/Discord). No memory reads, no hooks, no injection. |
 | **Admin rights** | Not required. Runs as standard user. |
 | **Antivirus** | May flag unsigned exe. Solution: code-signing cert (~$200/yr) or user adds exception. |
-| **Performance** | ~200ms per scan. Zero impact when idle. |
+| **Performance** | OCR runs only for manual scans or stable live-mode changes. Live mode samples the calibrated region every 2 seconds and limits OCR scans to one per 15 seconds. |
 
 ---
 

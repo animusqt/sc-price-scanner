@@ -541,6 +541,7 @@ ipcMain.on('set-collapsed', (_, collapsedState) => {
 });
 ipcMain.on('trigger-scan', () => sendToScanner('scan'));
 ipcMain.on('trigger-calibrate', () => sendToScanner('calibrate'));
+ipcMain.on('trigger-live-scan', () => sendToScanner('toggle_live_scan'));
 ipcMain.on('set-station', (_, station) => {
   stationOverride = String(station || '').trim();
   sendToScanner('set_station', { station: stationOverride });
@@ -584,6 +585,17 @@ ipcMain.on('open-site', () => {
 ipcMain.on('open-scans-folder', async () => {
   const dir = scansFolder();
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const err = await shell.openPath(dir);
+  if (err) toRenderer('scanner-log', `Could not open ${dir}: ${err}`);
+});
+ipcMain.on('open-debug-folder', async () => {
+  const dir = path.join(scansFolder(), 'debug');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    toRenderer('scanner-log', `Could not create ${dir}: ${err.message}`);
+    return;
+  }
   const err = await shell.openPath(dir);
   if (err) toRenderer('scanner-log', `Could not open ${dir}: ${err}`);
 });

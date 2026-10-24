@@ -69,6 +69,14 @@ calibrating = False
 calib_points = []
 last_preview_at = 0.0
 STATION_OVERRIDE = ""
+SCAN_LOCK = threading.Lock()
+LIVE_SCAN_LOCK = threading.Lock()
+LIVE_SCAN_STOP = threading.Event()
+LIVE_SCAN_THREAD = None
+LIVE_SCAN_INTERVAL_SECONDS = 2.0
+LIVE_SCAN_COOLDOWN_SECONDS = 15.0
+LIVE_SCAN_CHANGE_RATIO = 0.0015
+LIVE_SCAN_STABLE_RATIO = 0.0005
 
 
 def send(msg):
@@ -108,13 +116,110 @@ def run_ocr(img):
     return sc_parser.run_ocr(img)
 
 
-def annotate(img, ocr_data):
+def annotate(img, ocr_data, scale=None, offset_x=0):
     if ocr_data is None:
         return img
-    return sc_parser.annotate(img, ocr_data)
+    return sc_parser.annotate(img, ocr_data, scale=scale, offset_x=offset_x)
 
 
 def do_scan():
+    if not SCAN_LOCK.acquire(blocking=False):
+        send({"type": "status", "message": "A scan is already running; ignoring duplicate trigger."})
+        return
+    try:
+        return _do_scan()
+    finally:
+        SCAN_LOCK.release()
+
+
+def _live_signature(region):
+    image = grab(region)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    return cv2.resize(gray, (96, 64), interpolation=cv2.INTER_AREA)
+
+
+def _live_scan_loop():
+    send({"type": "live_scan_status", "enabled": True})
+    send({
+        "type": "status",
+        "message": (
+            "Low-impact live scan enabled: checking every 2 seconds; "
+            "OCR runs only after a stable change, at most once every 15 seconds."
+        ),
+    })
+    try:
+        previous = _live_signature(load_region())
+    except Exception as exc:
+        send({"type": "status", "message": f"Live scan capture failed: {exc}"})
+        send({"type": "live_scan_status", "enabled": False})
+        return
+
+    do_scan()
+    last_scan = time.monotonic()
+    candidate = None
+    stable_samples = 0
+    last_error = None
+
+    while not LIVE_SCAN_STOP.wait(LIVE_SCAN_INTERVAL_SECONDS):
+        if calibrating:
+            continue
+        try:
+            current = _live_signature(load_region())
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            if error != last_error:
+                send({"type": "status", "message": f"Live scan capture failed: {error}"})
+                last_error = error
+            continue
+
+        last_error = None
+        change_ratio = sc_parser.image_change_ratio(previous, current)
+        if candidate is None:
+            if change_ratio >= LIVE_SCAN_CHANGE_RATIO:
+                candidate = current
+                stable_samples = 0
+            else:
+                previous = current
+            continue
+
+        stable_ratio = sc_parser.image_change_ratio(candidate, current)
+        if stable_ratio <= LIVE_SCAN_STABLE_RATIO:
+            stable_samples += 1
+        else:
+            candidate = current
+            stable_samples = 0
+
+        if stable_samples < 2:
+            continue
+
+        now = time.monotonic()
+        if now - last_scan >= LIVE_SCAN_COOLDOWN_SECONDS:
+            do_scan()
+            last_scan = now
+        previous = current
+        candidate = None
+        stable_samples = 0
+
+    send({"type": "live_scan_status", "enabled": False})
+
+
+def toggle_live_scan():
+    global LIVE_SCAN_THREAD
+    with LIVE_SCAN_LOCK:
+        if LIVE_SCAN_THREAD is not None and LIVE_SCAN_THREAD.is_alive() and not LIVE_SCAN_STOP.is_set():
+            LIVE_SCAN_STOP.set()
+            enabled = False
+        else:
+            LIVE_SCAN_STOP.clear()
+            LIVE_SCAN_THREAD = threading.Thread(target=_live_scan_loop, daemon=True)
+            LIVE_SCAN_THREAD.start()
+            enabled = True
+    if not enabled:
+        send({"type": "live_scan_status", "enabled": False})
+        send({"type": "status", "message": "Low-impact live scan disabled."})
+
+
+def _do_scan():
     region = load_region()
     send({"type": "status", "message": f"Scanning {region['width']}x{region['height']}..."})
 
@@ -125,26 +230,58 @@ def do_scan():
         return
 
     DEBUG_DIR.mkdir(exist_ok=True)
-    stamp = int(time.time())
-    cv2.imwrite(str(DEBUG_DIR / f"raw_{stamp}.png"), img)
+    stamp = int(time.time() * 1000)
+    raw_path = DEBUG_DIR / f"raw_{stamp}.png"
+    if not cv2.imwrite(str(raw_path), img):
+        send({"type": "status", "message": f"Could not save debug capture: {raw_path}"})
 
     ocr_data, parsed, tag = run_ocr(img)
     rows = parsed["rows"]
     layout = parsed["layout"]
+    ocr_diagnostics = parsed.get("diagnostics", {})
 
     if ocr_data is not None:
-        cv2.imwrite(str(DEBUG_DIR / f"ocr_{stamp}.png"), annotate(img, ocr_data))
-
-    if not rows:
-        send({
-            "type": "status",
-            "message": f"No data (layout={layout}, {tag}). Open debug folder.",
-        })
-        return
+        scale = ocr_diagnostics.get("coordinate_scale")
+        offset_x = ocr_diagnostics.get("crop_left", 0)
+        annotated = annotate(img, ocr_data, scale=scale, offset_x=offset_x)
+        annotated_path = DEBUG_DIR / f"ocr_{stamp}.png"
+        if not cv2.imwrite(str(annotated_path), annotated):
+            send({"type": "status", "message": f"Could not save OCR overlay: {annotated_path}"})
 
     station = STATION_OVERRIDE or (
         sc_parser.detect_station(ocr_data) if ocr_data is not None else "Unknown Station"
     )
+    debug_path = DEBUG_DIR / f"scan_{stamp}.json"
+    debug_report = {
+        "timestamp": int(time.time()),
+        "station": station,
+        "capture": {
+            "region": region,
+            "width": int(img.shape[1]),
+            "height": int(img.shape[0]),
+        },
+        "ocr": ocr_diagnostics,
+        "result": {
+            "tag": tag,
+            "layout": layout,
+            "tab": parsed.get("tab"),
+            "rows": rows,
+        },
+    }
+    try:
+        debug_path.write_text(json.dumps(debug_report, indent=2), encoding="utf-8")
+    except OSError as exc:
+        send({"type": "status", "message": f"Could not save scan diagnostics: {exc}"})
+
+    if not rows:
+        errors = ocr_diagnostics.get("errors", [])
+        detail = errors[0].get("error", "No reliable values were found.") if errors else "No reliable values were found."
+        send({
+            "type": "status",
+            "message": f"No reliable data ({layout}, {tag}): {detail} Debug: {debug_path.name}",
+        })
+        return
+
     ts = int(time.time())
     merged_rows = sc_parser.merge_history(SCAN_DIR, station, rows, ts)
     scan = {
@@ -154,12 +291,22 @@ def do_scan():
         "inventory": parsed.get("inventory") or [],
         "layout": layout,
         "tab": parsed.get("tab"),
+        "quality": sc_parser.quality_report(parsed),
         "source": "player-scan",
         "version": "1.1",
     }
     out_path = sc_parser.station_scan_path(SCAN_DIR, station)
     out_path.write_text(json.dumps(scan, indent=2))
-    send({"type": "status", "message": f"Saved {out_path.name}: {len(rows)} new / {len(merged_rows)} known"})
+    quality = scan["quality"]
+    review = " Review recommended." if quality["review_recommended"] else ""
+    send({
+        "type": "status",
+        "message": (
+            f"Saved {out_path.name}: {len(rows)} new / {len(merged_rows)} known; "
+            f"tab={quality['active_tab'] or 'unconfirmed'}, "
+            f"{quality['ocr_passes']} OCR passes.{review} Debug: {debug_path.name}"
+        ),
+    })
     send({"type": "scan_complete", "payload": scan, "file": str(out_path)})
 
 
@@ -243,7 +390,10 @@ def handle_stdin():
                 send({"type": "status", "message": f"Station set to {STATION_OVERRIDE}"})
             else:
                 send({"type": "status", "message": "Station set to auto-detect"})
+        elif action == "toggle_live_scan":
+            toggle_live_scan()
         elif action == "quit":
+            LIVE_SCAN_STOP.set()
             send({"type": "status", "message": "Exiting"})
             os._exit(0)
 

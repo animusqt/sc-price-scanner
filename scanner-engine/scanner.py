@@ -124,11 +124,11 @@ def run_ocr(img):
     return sc_parser.run_ocr(img)
 
 
-def annotate(img, ocr_data):
+def annotate(img, ocr_data, scale=None, offset_x=0):
     """Draw OCR boxes onto a copy of the image for debugging."""
     if ocr_data is None:
         return img
-    return sc_parser.annotate(img, ocr_data)
+    return sc_parser.annotate(img, ocr_data, scale=scale, offset_x=offset_x)
 
 
 def do_scan():
@@ -143,23 +143,56 @@ def do_scan():
         return None
 
     DEBUG_DIR.mkdir(exist_ok=True)
-    stamp = int(time.time())
+    stamp = int(time.time() * 1000)
     raw_path = DEBUG_DIR / f"raw_{stamp}.png"
-    cv2.imwrite(str(raw_path), img)
+    if not cv2.imwrite(str(raw_path), img):
+        log(f"[ERROR] Could not save debug capture: {raw_path}")
 
     ocr_data, parsed, tag = run_ocr(img)
     rows = parsed["rows"]
     layout = parsed["layout"]
+    ocr_diagnostics = parsed.get("diagnostics", {})
 
     if ocr_data is not None:
-        annotated = annotate(img, ocr_data)
-        cv2.imwrite(str(DEBUG_DIR / f"ocr_{stamp}.png"), annotated)
-
-    if not rows:
-        log(f"[NO DATA] layout={layout} variant={tag}. See {DEBUG_DIR}")
-        return None
+        annotated = annotate(
+            img,
+            ocr_data,
+            scale=ocr_diagnostics.get("coordinate_scale"),
+            offset_x=ocr_diagnostics.get("crop_left", 0),
+        )
+        annotated_path = DEBUG_DIR / f"ocr_{stamp}.png"
+        if not cv2.imwrite(str(annotated_path), annotated):
+            log(f"[ERROR] Could not save OCR overlay: {annotated_path}")
 
     station = sc_parser.detect_station(ocr_data) if ocr_data is not None else "Unknown Station"
+    debug_path = DEBUG_DIR / f"scan_{stamp}.json"
+    debug_report = {
+        "timestamp": int(time.time()),
+        "station": station,
+        "capture": {
+            "region": region,
+            "width": int(img.shape[1]),
+            "height": int(img.shape[0]),
+        },
+        "ocr": ocr_diagnostics,
+        "result": {
+            "tag": tag,
+            "layout": layout,
+            "tab": parsed.get("tab"),
+            "rows": rows,
+        },
+    }
+    try:
+        debug_path.write_text(json.dumps(debug_report, indent=2), encoding="utf-8")
+    except OSError as exc:
+        log(f"[ERROR] Could not save scan diagnostics: {exc}")
+
+    if not rows:
+        errors = ocr_diagnostics.get("errors", [])
+        detail = errors[0].get("error", "No reliable values were found.") if errors else "No reliable values were found."
+        log(f"[NO DATA] {layout}, {tag}: {detail}. Debug: {debug_path.name}")
+        return None
+
     ts = int(time.time())
     merged_rows = sc_parser.merge_history(SCAN_DIR, station, rows, ts)
 
@@ -170,13 +203,21 @@ def do_scan():
         "inventory": parsed.get("inventory") or [],
         "layout": layout,
         "tab": parsed.get("tab"),
+        "quality": sc_parser.quality_report(parsed),
         "source": "player-scan",
         "version": "1.1",
     }
     out = sc_parser.station_scan_path(SCAN_DIR, station)
     out.write_text(json.dumps(scan, indent=2))
 
-    log(f"[OK] {len(rows)} new / {len(merged_rows)} known commodities ({layout}) from {station} -> {out.name}")
+    quality = scan["quality"]
+    review = " Review recommended." if quality["review_recommended"] else ""
+    log(
+        f"[OK] {len(rows)} new / {len(merged_rows)} known commodities "
+        f"({layout}, tab={quality['active_tab'] or 'unconfirmed'}, "
+        f"{quality['ocr_passes']} OCR passes) from {station} -> {out.name}."
+        f"{review} Debug: {debug_path.name}"
+    )
     return scan
 
 

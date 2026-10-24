@@ -6,18 +6,21 @@
 import os
 import sys
 import shutil
+import tempfile
 from pathlib import Path
 
 import PyInstaller.__main__
 
-os.chdir(Path(__file__).resolve().parent)
+ENGINE_DIR = Path(__file__).resolve().parent
+os.chdir(ENGINE_DIR)
 
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 
-DIST = Path("dist")
-BUILD = Path("build")
-TESSDATA_DST = Path("tessdata")
+DIST = ENGINE_DIR / "dist"
+BUILD = Path(tempfile.gettempdir()) / "sc-price-scanner-pyinstaller"
+LOCAL_BUILD = ENGINE_DIR / "build"
+TESSDATA_DST = ENGINE_DIR / "tessdata"
 
 
 def tessdata_sources():
@@ -36,7 +39,7 @@ def tessdata_sources():
 
 
 # Clean previous builds
-for p in [DIST, BUILD]:
+for p in [DIST, BUILD, LOCAL_BUILD]:
     if p.exists():
         shutil.rmtree(p, ignore_errors=True)
 
@@ -63,6 +66,9 @@ else:
 COMMON_ARGS = [
     "--onefile",
     "--clean",
+    f"--distpath={DIST}",
+    f"--workpath={BUILD}",
+    f"--specpath={ENGINE_DIR}",
     "--hidden-import=pytesseract",
     "--hidden-import=cv2",
     "--hidden-import=mss",
@@ -72,7 +78,7 @@ COMMON_ARGS = [
 COMMON_ARGS += [f"--hidden-import={b}" for b in PYNPUT_BACKENDS]
 
 if TESSDATA_DST.exists():
-    COMMON_ARGS.append(f"--add-data=tessdata{SEP}tessdata")
+    COMMON_ARGS.append(f"--add-data={TESSDATA_DST.resolve()}{SEP}tessdata")
 
 
 def final_name(name: str) -> str:
@@ -109,10 +115,10 @@ if __name__ == "__main__":
     print("=" * 60)
 
     # 1. CLI Scanner (standalone, hotkey-based)
-    build(Path("scanner.py"), "SC-Price-Scanner")
+    build(ENGINE_DIR / "scanner.py", "SC-Price-Scanner")
 
     # 2. Overlay Bridge (stdin/stdout JSON for Electron)
-    build(Path("scanner_overlay_bridge.py"), "SC-Price-Scanner-Bridge", console=True)
+    build(ENGINE_DIR / "scanner_overlay_bridge.py", "SC-Price-Scanner-Bridge", console=True)
 
     print("\n" + "=" * 60)
     print("Build complete. Files in dist/:")

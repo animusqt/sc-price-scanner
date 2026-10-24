@@ -150,8 +150,13 @@
             <span>Calibrate Region (F8)</span>
             <kbd class="kbd">F8</kbd>
           </button>
+          <button class="btn btn-ghost" id="liveScanBtn" type="button" aria-pressed="false">
+            <span>Start Low-Impact Live Scan</span>
+          </button>
         </div>
         <p class="hint">Open commodity terminal in-game, then press <kbd>F9</kbd></p>
+        <p class="hint">Live mode checks every 2 seconds and only runs OCR after a stable change (15-second minimum between scans).</p>
+        <button class="btn btn-ghost" id="openDebugFolder">Open Scan Diagnostics</button>
       </section>
 
       <!-- Recent scan preview -->

@@ -12,6 +12,7 @@ const elements = {
   commodityCount: document.getElementById('commodityCount'),
   scanBtn: document.getElementById('scanBtn'),
   calibrateBtn: document.getElementById('calibrateBtn'),
+  liveScanBtn: document.getElementById('liveScanBtn'),
   clickThroughBtn: document.getElementById('clickThroughBtn'),
   minimizeBtn: document.getElementById('minimizeBtn'),
   closeBtn: document.getElementById('closeBtn'),
@@ -19,6 +20,7 @@ const elements = {
   previewTable: document.getElementById('previewTable'),
   previewCargo: document.getElementById('previewCargo'),
   openScanFolder: document.getElementById('openScanFolder'),
+  openDebugFolder: document.getElementById('openDebugFolder'),
   uploadToSite: document.getElementById('uploadToSite'),
   logConsole: document.getElementById('logConsole'),
   titleBar: document.getElementById('titleBar'),
@@ -211,12 +213,20 @@ function setupEventListeners() {
     api.triggerCalibrate();
     log('info', 'Calibration mode triggered (F8)');
   });
+  elements.liveScanBtn.addEventListener('click', () => {
+    api.triggerLiveScan();
+    elements.liveScanBtn.disabled = true;
+    setTimeout(() => {
+      elements.liveScanBtn.disabled = false;
+    }, 2000);
+  });
   
   // Click-through toggle
   elements.clickThroughBtn.addEventListener('click', toggleClickThrough);
   
   // Preview actions
   elements.openScanFolder.addEventListener('click', openScanFolder);
+  elements.openDebugFolder.addEventListener('click', () => api.openDebugFolder());
   elements.uploadToSite.addEventListener('click', uploadToSite);
   
   // Drag handling for title bar (when not click-through)
@@ -261,12 +271,24 @@ function setupScannerListeners() {
 }
 
 function handleScannerOutput(data) {
-  if (data.type === 'scan_complete') {
+  if (data.type === 'live_scan_status') {
+    const enabled = !!data.enabled;
+    elements.liveScanBtn.disabled = false;
+    elements.liveScanBtn.setAttribute('aria-pressed', String(enabled));
+    elements.liveScanBtn.querySelector('span').textContent = enabled
+      ? 'Stop Low-Impact Live Scan'
+      : 'Start Low-Impact Live Scan';
+    elements.liveScanBtn.classList.toggle('btn-primary', enabled);
+    elements.liveScanBtn.classList.toggle('btn-ghost', !enabled);
+  } else if (data.type === 'scan_complete') {
     if (collapsed) toggleCollapse(false);
     lastScanData = data.payload;
     updateScanPreview(data.payload);
     setStatus('connected', 'Connected');
     log('success', `Scan complete: ${data.payload.commodities.length} commodities from ${data.payload.station}`);
+    if (data.payload.quality && data.payload.quality.review_recommended) {
+      data.payload.quality.warnings.forEach((warning) => log('warn', warning));
+    }
   } else if (data.type === 'calibration_complete') {
     log('success', `Calibration saved: ${JSON.stringify(data.payload)}`);
   } else if (data.type === 'status') {

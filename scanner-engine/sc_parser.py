@@ -574,40 +574,114 @@ def _detect_tab(lines, color_image=None, proc_w=None, proc_h=None, right_min=0):
             n = _norm(s["text"])
             if n:
                 texts.append((s, n))
-    # Prefer the row labels on the right-hand commodity list. The BUY tab shows
-    # inventory levels ("MAX INVENTORY"), the LOCAL MARKET VALUE tab shows
-    # demand ("IN DEMAND" / "NO DEMAND" / "CANNOT SELL").
     right = [n for s, n in texts if s["x_center"] >= right_min]
     joined = " ".join(right)
-    if "demand" in joined:
-        return "sell"
-    if "inventory" in joined:
-        return "buy"
 
-    # Fallback: compare the tab label backgrounds (the active tab is filled).
-    if color_image is None or not proc_w or not proc_h:
-        return None
-    scale = proc_w / float(color_image.shape[1])
-    heights = {}
-    for s, n in texts:
-        if s["y_center"] > 0.18 * proc_h:
-            continue
-        kind = None
-        if n == "buy":
-            kind = "buy"
-        elif "local" in n and "value" in n:
-            kind = "sell"
-        if kind is None:
-            continue
-        x1 = max(0, int(s["x"] / scale))
-        y1 = max(0, int(s["y"] / scale))
-        x2 = min(color_image.shape[1], int((s["x"] + s["w"]) / scale))
-        y2 = min(color_image.shape[0], int((s["y"] + s["h"]) / scale))
-        patch = color_image[y1:y2, x1:x2]
-        if patch.size:
-            heights[kind] = max(heights.get(kind, 0.0), float(patch.mean()))
-    if len(heights) == 2 and abs(heights["buy"] - heights["sell"]) >= 6:
-        return "buy" if heights["buy"] > heights["sell"] else "sell"
+    # The "SHOP INVENTORY" title is present on both tabs; inspect the active
+    # tab background instead of treating that shared label as a buy indicator.
+    tab_scores = {}
+    if color_image is not None and proc_w and proc_h:
+        scale_x = proc_w / float(color_image.shape[1])
+        scale_y = proc_h / float(color_image.shape[0])
+        tab_labels = {}
+        for segment, text in texts:
+            if segment["y_center"] > 0.22 * proc_h:
+                continue
+            if text == "buy":
+                tab_labels["buy"] = segment
+            elif "local" in text and "value" in text:
+                tab_labels["sell"] = segment
+
+        for kind, segment in tab_labels.items():
+            pad_x = max(18, int(segment["w"] / scale_x * 1.5))
+            pad_y = max(10, int(segment["h"] / scale_y * 1.2))
+            x1 = max(0, int(segment["x"] / scale_x) - pad_x)
+            y1 = max(0, int(segment["y"] / scale_y) - pad_y)
+            x2 = min(
+                color_image.shape[1],
+                int((segment["x"] + segment["w"]) / scale_x) + pad_x,
+            )
+            y2 = min(
+                color_image.shape[0],
+                int((segment["y"] + segment["h"]) / scale_y) + pad_y,
+            )
+            patch = color_image[y1:y2, x1:x2]
+            if patch.size:
+                hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+                active_blue = (
+                    (hsv[:, :, 0] >= 75)
+                    & (hsv[:, :, 0] <= 105)
+                    & (hsv[:, :, 1] >= 60)
+                    & (hsv[:, :, 2] >= 60)
+                )
+                tab_scores[kind] = float(np.count_nonzero(active_blue)) / active_blue.size
+
+        if len(tab_scores) < 2:
+            shop_header = next(
+                (
+                    line["segments"]
+                    for line in lines
+                    if any("shop" in _norm(segment["text"]) for segment in line["segments"])
+                    and any(
+                        "inventory" in _norm(segment["text"])
+                        for segment in line["segments"]
+                    )
+                ),
+                None,
+            )
+            if shop_header is not None:
+                shop_segments = [
+                    segment for segment in shop_header
+                    if "shop" in _norm(segment["text"])
+                    or (
+                        "inventory" in _norm(segment["text"])
+                        and segment["x_center"] >= right_min
+                    )
+                ]
+                header_left = min(segment["x"] for segment in shop_segments)
+                header_top = min(segment["y"] for segment in shop_segments)
+                header_bottom = max(
+                    segment["y"] + segment["h"] for segment in shop_segments
+                ) / scale_y
+                header_height = max(
+                    (max(segment["y"] + segment["h"] for segment in shop_segments)
+                     - header_top) / scale_y,
+                    1,
+                )
+                panel_left = max(0, int(header_left / scale_x - header_height))
+                panel_right = color_image.shape[1] - max(
+                    8, int(color_image.shape[1] * 0.02)
+                )
+                split = int(panel_left + 0.31 * (panel_right - panel_left))
+                y1 = max(0, int(header_bottom + 0.5 * header_height))
+                y2 = min(color_image.shape[0], int(header_bottom + 5 * header_height))
+                for kind, x1, x2 in (
+                    ("buy", panel_left, split),
+                    ("sell", split, panel_right),
+                ):
+                    patch = color_image[y1:y2, x1:x2]
+                    if patch.size:
+                        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+                        active_blue = (
+                            (hsv[:, :, 0] >= 75)
+                            & (hsv[:, :, 0] <= 105)
+                            & (hsv[:, :, 1] >= 60)
+                            & (hsv[:, :, 2] >= 60)
+                        )
+                        tab_scores[kind] = (
+                            float(np.count_nonzero(active_blue)) / active_blue.size
+                        )
+
+    if len(tab_scores) == 2 and abs(tab_scores["buy"] - tab_scores["sell"]) >= 0.12:
+        return max(tab_scores, key=tab_scores.get)
+
+    sell_markers = ("indemand", "nodemand", "cannotsell", "sellablecargo", "outofstock")
+    buy_markers = ("maxinventory", "veryhighinventory", "highinventory", "lowinventory")
+    has_sell_marker = any(marker in joined for marker in sell_markers)
+    has_buy_marker = any(marker in joined for marker in buy_markers)
+    if has_sell_marker != has_buy_marker:
+        return "sell" if has_sell_marker else "buy"
+
     return None
 
 
@@ -619,7 +693,7 @@ def parse_commodities(ocr_data, image=None, color_image=None):
     proc_w = image.shape[1] if image is not None else None
     proc_h = image.shape[0] if image is not None else None
     joined_all = " ".join(_norm(s["text"]) for line in lines for s in line["segments"])
-    has_left = "selectlocation" in joined_all
+    has_left = "selectlocation" in joined_all or "yourinventories" in joined_all
     min_x = 0.45 * proc_w if (has_left and proc_w) else 0
     tab = _detect_tab(lines, color_image, proc_w, proc_h, right_min=min_x)
 
@@ -658,6 +732,12 @@ def preprocess(img, scale=5, max_dim=3200):
     return variants
 
 
+def image_change_ratio(first, second):
+    """Return the fraction of pixels with a meaningful grayscale difference."""
+    difference = cv2.absdiff(first, second)
+    return float(np.count_nonzero(difference >= 18)) / difference.size
+
+
 def _name_is_clean(name):
     if not name:
         return False
@@ -665,13 +745,17 @@ def _name_is_clean(name):
     return len(letters) >= 3 and re.fullmatch(r"[A-Za-z][A-Za-z0-9 '&.\-]*", name.strip()) is not None
 
 
-def _merge_results(collected):
-    """Vote across many OCR passes to get the most reliable value per field."""
+def _merge_results(collected, active_tab=None, diagnostics=None):
+    """Keep values confirmed by multiple OCR passes."""
     def build(allow_guessed):
         buckets = {}
         for score, parsed in collected:
             is_guessed = parsed["layout"] == "guessed"
             if is_guessed and not allow_guessed:
+                continue
+            if parsed["layout"] == "modal" and (
+                active_tab is None or parsed.get("tab") != active_tab
+            ):
                 continue
             for r in parsed["rows"]:
                 key = canonical_commodity(r.get("commodity"))
@@ -695,6 +779,7 @@ def _merge_results(collected):
     buckets = build(allow_guessed=False) or build(allow_guessed=True)
 
     rows = []
+    field_votes = {}
     for b in buckets.values():
         row = {"commodity": b["commodity"], "layout": b["layout"]}
         for f in ("buy", "sell", "stock", "demand"):
@@ -704,23 +789,58 @@ def _merge_results(collected):
                 continue
             counts = {}
             for v, s in vals:
-                counts[v] = counts.get(v, 0) + 1
-            row[f] = max(
-                counts,
-                key=lambda v: (counts[v], max(s for vv, s in vals if vv == v)),
+                counts.setdefault(v, []).append(s)
+            ranked = sorted(counts, key=lambda v: (-len(counts[v]), -max(counts[v])))
+            winner = ranked[0]
+            accepted = len(counts[winner]) >= 2 and (
+                len(ranked) == 1 or len(counts[winner]) > len(counts[ranked[1]])
             )
+            row[f] = winner if accepted else None
+            if len(counts) > 1 or not accepted:
+                field_votes.setdefault(b["commodity"], {})[f] = {
+                    "counts": {str(value): len(scores) for value, scores in counts.items()},
+                    "accepted": accepted,
+                }
         if b["label"]:
             counts = {}
             for v, s in b["label"]:
-                counts[v] = counts.get(v, 0) + 1
-            row["demand_label"] = max(
-                counts,
-                key=lambda v: (counts[v], max(s for vv, s in b["label"] if vv == v)),
+                counts.setdefault(v, []).append(s)
+            ranked = sorted(counts, key=lambda v: (-len(counts[v]), -max(counts[v])))
+            winner = ranked[0]
+            row["demand_label"] = (
+                winner
+                if len(counts[winner]) >= 2 and (
+                    len(ranked) == 1 or len(counts[winner]) > len(counts[ranked[1]])
+                )
+                else None
             )
         rows.append((b["best_score"], row))
 
     rows.sort(key=lambda t: (-t[0], t[1]["commodity"]))
+    if diagnostics is not None:
+        diagnostics["field_votes"] = field_votes
     return [r for _, r in rows]
+
+
+def quality_report(parsed):
+    diagnostics = parsed.get("diagnostics") or {}
+    warnings = []
+    if parsed.get("layout") == "unknown":
+        warnings.append("No recognized commodity layout.")
+    if any("active Buy/Local Market Value tab" in item.get("error", "")
+           for item in diagnostics.get("errors", [])):
+        warnings.append("The active kiosk tab could not be confirmed.")
+    if diagnostics.get("field_votes"):
+        warnings.append("One or more values lacked agreement across OCR passes.")
+    if diagnostics.get("errors"):
+        warnings.append("One or more OCR passes failed; see the debug report.")
+    return {
+        "review_recommended": bool(warnings),
+        "warnings": warnings,
+        "ocr_passes": len(diagnostics.get("passes", [])),
+        "active_tab": diagnostics.get("active_tab"),
+        "tab_votes": diagnostics.get("tab_votes", {}),
+    }
 
 
 def parse_inventory(lines, color_image=None, proc_w=None):
@@ -783,32 +903,49 @@ def parse_inventory(lines, color_image=None, proc_w=None):
     return sorted(items.values(), key=lambda r: r["commodity"])
 
 
-def _probe_left_panel(img):
-    """Quick low-cost pass to see if the capture includes YOUR INVENTORIES."""
+def _probe_left_panel(img, diagnostics=None):
+    """Detect and read the player's inventory panel using one low-cost OCR pass."""
     try:
         processed = preprocess(img, max_dim=2400)["otsu_inv"]
         data = pytesseract.image_to_data(
             processed, output_type=pytesseract.Output.DICT, config="--oem 3 --psm 6"
         )
-    except Exception:
+    except Exception as exc:
+        if diagnostics is not None:
+            diagnostics["left_panel_error"] = f"{type(exc).__name__}: {exc}"
         return None
-    txt = re.sub(r"[^a-z]", "", " ".join(data.get("text") or []).lower())
-    if "selectlocation" in txt:
+    recognized_text = " ".join(text.strip() for text in data.get("text", []) if text and text.strip())
+    txt = re.sub(r"[^a-z]", "", recognized_text.lower())
+    detected = "selectlocation" in txt or "yourinventories" in txt
+    if diagnostics is not None:
+        diagnostics["left_panel"] = {
+            "detected": detected,
+            "recognized_text": recognized_text[:2000],
+        }
+    if detected:
         return data, processed
     return None
 
 
 def run_ocr(img):
-    """Run many preprocessing/PSM passes and vote on the most reliable values."""
+    """Run bounded OCR passes, isolate the market panel, and retain consensus."""
+    diagnostics = {
+        "left_panel": {"detected": False},
+        "passes": [],
+        "errors": [],
+    }
     inventory = []
-    probe = _probe_left_panel(img)
+    probe = _probe_left_panel(img, diagnostics)
+    crop_left = 0
     if probe is not None:
         probe_data, probe_img = probe
         inventory = parse_inventory(
             group_lines(probe_data), color_image=img, proc_w=probe_img.shape[1]
         )
-        # OCR the commodity list only: the inventories column confuses layout.
-        img = img[:, int(0.45 * img.shape[1]):]
+        # The market pane is on the right; excluding player inventory text also
+        # prevents its "IN DEMAND" label from changing the active kiosk tab.
+        crop_left = int(0.45 * img.shape[1])
+        img = img[:, crop_left:]
 
     variants = preprocess(img)
     # 2 preprocessors x 2 layouts is enough for reliable voting and keeps a scan
@@ -818,7 +955,6 @@ def run_ocr(img):
     variant_weight = {"otsu_inv": 6, "otsu": 2}
 
     collected = []
-    layout_scores = {}
     best_data = None
     best_score = None
     best_processed = None
@@ -829,20 +965,32 @@ def run_ocr(img):
                 data = pytesseract.image_to_data(
                     processed, output_type=pytesseract.Output.DICT, config=cfg
                 )
-            except Exception:
+            except Exception as exc:
+                diagnostics["errors"].append({
+                    "variant": vname,
+                    "config": cfg,
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
                 continue
             parsed = parse_commodities(data, image=processed, color_image=img)
             score = layout_bonus.get(parsed["layout"], 0)
             for r in parsed["rows"]:
-                if r.get("sell") or r.get("buy"):
+                if r.get("sell") is not None or r.get("buy") is not None:
                     score += 10
                 if canonical_commodity(r.get("commodity")):
                     score += 6
-                if r.get("stock"):
+                if r.get("stock") is not None:
                     score += 4
             score += variant_weight.get(vname, 0)
             collected.append((score, parsed))
-            layout_scores[parsed["layout"]] = layout_scores.get(parsed["layout"], 0) + max(score, 0)
+            diagnostics["passes"].append({
+                "variant": vname,
+                "config": cfg,
+                "score": score,
+                "layout": parsed["layout"],
+                "tab": parsed.get("tab"),
+                "rows": parsed["rows"],
+            })
             if best_score is None or score > best_score:
                 best_score = score
                 best_data = data
@@ -850,31 +998,86 @@ def run_ocr(img):
                 best_parsed = parsed
 
     if not collected:
-        return None, {"rows": [], "layout": "unknown"}, "none"
+        diagnostics["coordinate_scale"] = 1
+        diagnostics["crop_left"] = crop_left
+        return None, {
+            "rows": [],
+            "layout": "unknown",
+            "tab": None,
+            "diagnostics": diagnostics,
+        }, "none"
 
-    rows = _merge_results(collected)
+    tab_counts = {}
+    for _, parsed in collected:
+        if parsed["layout"] == "modal" and parsed.get("tab"):
+            tab = parsed["tab"]
+            tab_counts[tab] = tab_counts.get(tab, 0) + 1
+    active_tab = None
+    if tab_counts:
+        candidate = max(tab_counts, key=tab_counts.get)
+        if tab_counts[candidate] > sum(tab_counts.values()) / 2:
+            active_tab = candidate
+    diagnostics["tab_votes"] = tab_counts
+    diagnostics["active_tab"] = active_tab
+
+    has_modal = any(parsed["layout"] == "modal" for _, parsed in collected)
+    vote_inputs = [
+        (score, parsed)
+        for score, parsed in collected
+        if parsed["layout"] != "modal" or (
+            active_tab is not None and parsed.get("tab") == active_tab
+        )
+    ]
+    if has_modal and active_tab is None:
+        vote_inputs = [
+            (score, parsed)
+            for score, parsed in vote_inputs
+            if parsed["layout"] != "guessed"
+        ]
+
+    rows = _merge_results(vote_inputs, active_tab, diagnostics)
     layout = "table" if any(r["layout"] == "table" for r in rows) else (
         "modal" if any(r["layout"] == "modal" for r in rows) else "unknown"
     )
-    tab = best_parsed.get("tab") if best_parsed else None
+    tab = (
+        active_tab if has_modal
+        else best_parsed.get("tab") if best_parsed
+        else None
+    )
     inventory = []
     if probe is None and best_data is not None and best_processed is not None:
         inventory = parse_inventory(
             group_lines(best_data), color_image=img, proc_w=best_processed.shape[1]
         )
+    scale_x = best_processed.shape[1] / float(img.shape[1]) if best_processed is not None else 1
+    scale_y = best_processed.shape[0] / float(img.shape[0]) if best_processed is not None else 1
+    diagnostics["coordinate_scale"] = {"x": scale_x, "y": scale_y}
+    diagnostics["crop_left"] = crop_left
+    diagnostics["row_count"] = len(rows)
+    if has_modal and active_tab is None:
+        diagnostics["errors"].append({
+            "error": "The active Buy/Local Market Value tab could not be confirmed."
+        })
     return best_data, {
         "rows": rows,
         "layout": layout,
         "headers": [],
         "inventory": inventory,
-        "tab": tab,
+        "tab": active_tab or tab,
+        "diagnostics": diagnostics,
     }, "merged"
 
 
-def annotate(image, ocr_data):
+def annotate(image, ocr_data, scale=None, offset_x=0):
     vis = image.copy()
     if vis.ndim == 2:
         vis = cv2.cvtColor(vis, cv2.COLOR_GRAY2BGR)
+    if scale is None:
+        scale = {"x": 1, "y": 1}
+    if isinstance(scale, (int, float)):
+        scale = {"x": scale, "y": scale}
+    scale_x = max(float(scale.get("x", 1)), 0.01)
+    scale_y = max(float(scale.get("y", 1)), 0.01)
     for i in range(len(ocr_data.get("text", []))):
         txt = (ocr_data["text"][i] or "").strip()
         if not txt:
@@ -885,10 +1088,23 @@ def annotate(image, ocr_data):
             continue
         if conf < 0:
             continue
-        x, y = ocr_data["left"][i], ocr_data["top"][i]
-        w, h = ocr_data["width"][i], ocr_data["height"][i]
+        x = int(ocr_data["left"][i] / scale_x) + int(offset_x)
+        y = int(ocr_data["top"][i] / scale_y)
+        w = int(ocr_data["width"][i] / scale_x)
+        h = int(ocr_data["height"][i] / scale_y)
         color = (0, 200, 0) if conf > 60 else (0, 165, 255)
         cv2.rectangle(vis, (x, y), (x + w, y + h), color, 1)
+        label = f"{txt[:20]} {conf:.0f}"
+        cv2.putText(
+            vis,
+            label,
+            (x, max(10, y - 3)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.35,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
     return vis
 
 

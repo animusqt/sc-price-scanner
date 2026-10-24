@@ -7,7 +7,9 @@ contextBridge.exposeInMainWorld('scannerAPI', {
   
   triggerScan: () => ipcRenderer.send('trigger-scan'),
   triggerCalibrate: () => ipcRenderer.send('trigger-calibrate'),
+  triggerLiveScan: () => ipcRenderer.send('trigger-live-scan'),
   openScansFolder: () => ipcRenderer.send('open-scans-folder'),
+  openDebugFolder: () => ipcRenderer.send('open-debug-folder'),
   getScansFolder: () => ipcRenderer.invoke('get-scans-folder'),
   openSite: () => ipcRenderer.send('open-site'),
   rendererReady: () => ipcRenderer.send('renderer-ready'),
