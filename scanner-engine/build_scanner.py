@@ -10,6 +10,8 @@ from pathlib import Path
 
 import PyInstaller.__main__
 
+os.chdir(Path(__file__).resolve().parent)
+
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 

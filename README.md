@@ -1,17 +1,18 @@
-# SC Price Scanner — Standalone Build & Distribution Guide
+# SC Price Scanner
 
-## Quick Start (for your users)
+## Launch the overlay
 
-1. Download `SC-Price-Scanner.exe` from your releases
-2. Run it — no install needed
-3. Press **F8** once to calibrate (click corners of commodity terminal)
-4. In-game: open a commodity kiosk → press **F9** to scan
-5. JSON scans appear in `Documents\SC-Truckers Scans\` (opened via the overlay's **Open Scan Folder** button)
-6. Drag any `.json` into your website's **Import Scan** button
+Double-click **`Launch Overlay.bat`** in the project folder. It opens the overlay directly without leaving a terminal window open. On first launch, it installs the Electron dependencies in the background.
+
+The scanner bridge must also be built before the overlay can scan. The launcher looks for it in `scanner-engine\dist\`. See [Build the scanner](#build-the-scanner) if it is not there.
+
+Closing the overlay window hides it to the system tray; choose **Quit** from the tray menu to exit completely.
+
+In the overlay, choose **Calibrate Region** and click the scan area's top-left corner. A highlighted box follows your cursor; click the bottom-right corner to save the region. Press **Esc** to cancel. Then open a commodity kiosk and choose **Scan Terminal**. Scan files are saved under `Documents\SC-Truckers Scans\`.
 
 ---
 
-## Build Instructions (for you)
+## Build the scanner
 
 ### Prerequisites
 ```bash
@@ -25,10 +26,9 @@ winget install UB-Mannheim.TesseractOCR
 
 ### Build
 ```bash
-cd sc_price_scanner
-python build_scanner.py
+python scanner-engine\build_scanner.py
 ```
-Output: `dist/SC-Price-Scanner.exe` (~35-45 MB)
+Output: `scanner-engine\dist\SC-Price-Scanner-Bridge.exe` and `SC-Price-Scanner.exe` (~35-45 MB each).
 
 ### What's Bundled
 - Python interpreter + all deps
@@ -71,7 +71,7 @@ Add `electron-updater` style checks or simple version JSON on your CDN.
 ## Customization
 
 ### Change hotkeys
-Edit `scanner.py`:
+Edit `scanner-engine/scanner.py`:
 ```python
 # Line ~180
 if key == keyboard.Key.f8:  # calibration
@@ -80,7 +80,7 @@ if key == keyboard.Key.f10: # quit
 ```
 
 ### Add more stations
-Edit `KNOWN_STATIONS` list in `scanner.py`
+Edit `KNOWN_STATIONS` list in `scanner-engine/scanner.py`
 
 ### Adjust OCR sensitivity
 ```python
@@ -105,20 +105,16 @@ SCAN_DIR = Path.home() / "OneDrive" / "Documents" / "SC-Truckers Scans"
 | Wrong station name | Station detection uses OCR on top UI. Add station to `KNOWN_STATIONS`. |
 | Numbers wrong (1,234 → 1234) | Already handled. Check `parse_num` function. |
 | Slow scan | Reduce capture region size. Disable `--noconsole` to see timing. |
-| Tesseract not found | Ensure `tessdata/` folder is next to exe (bundled by build script). |
+| Tesseract not found | Ensure `scanner-engine/tessdata/` is available to the build script. |
 
 ---
 
 ## File Structure
 ```
 sc_price_scanner/
-├── scanner.py          # Main script
-├── build_scanner.py    # Build script
-├── tessdata/           # OCR language data (copied at build)
-│   └── eng.traineddata
-├── scanner.ico         # Optional icon
-├── dist/
-│   └── SC-Price-Scanner.exe
+├── Launch Overlay.bat  # One-click launcher
+├── electron-overlay/   # Desktop overlay application
+├── scanner-engine/     # Python scanner, bridge, and build files
 └── README.md
 ```
 

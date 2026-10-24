@@ -20,6 +20,8 @@
       "overlay.html",
       "overlay.css",
       "renderer.js",
+      "region-preview.html",
+      "region-preview.css",
       "icon.png",
       "icon.ico",
       "icon.icns"

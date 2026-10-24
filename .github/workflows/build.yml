@@ -62,6 +62,7 @@ jobs:
 
       - name: Prepare tessdata
         run: |
+          cd scanner-engine
           mkdir -p tessdata
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp "C:/Program Files/Tesseract-OCR/tessdata/eng.traineddata" tessdata/
@@ -74,18 +75,18 @@ jobs:
           fi
 
       - name: Build scanner executable
-        run: python build_scanner.py
+        run: cd scanner-engine && python build_scanner.py
 
       - name: Verify build
         run: |
-          ls -la dist/
-          file dist/* 2>/dev/null || true
+          ls -la scanner-engine/dist/
+          file scanner-engine/dist/* 2>/dev/null || true
 
       - name: Upload scanner artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/*
+          path: scanner-engine/dist/*
           retention-days: 30
 
   # ============================================================

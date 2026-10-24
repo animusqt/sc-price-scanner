@@ -88,7 +88,7 @@ export function MarketPage() {
 }
 
 // -----------------------------------------------------------------------------
-// FILE: src/components/ScanImport.tsx (copy from sc_price_scanner/ScanImport.tsx)
+// FILE: src/components/ScanImport.tsx (copy from sc_price_scanner/scanner-engine/ScanImport.tsx)
 // -----------------------------------------------------------------------------
 // Already created - just drop into your components folder
 
@@ -160,7 +160,7 @@ export function ToolsPage() {
 */
 
 // -----------------------------------------------------------------------------
-// COMPONENT: src/components/ScannerDownload.tsx
+// COMPONENT: copy from sc_price_scanner/scanner-engine/ScannerDownload.tsx
 // -----------------------------------------------------------------------------
 /*
 import { Download, Monitor, Apple, Terminal } from 'lucide-react';
@@ -214,8 +214,8 @@ git clone https://github.com/YOUR_USERNAME/sc-truckers.git
 cd sc-truckers
 
 # 2. Copy new files
-cp -r ../sc_price_scanner/ScanImport.tsx src/components/
-cp -r ../sc_price_scanner/ScannerDownload.tsx src/components/
+cp -r ../sc_price_scanner/scanner-engine/ScanImport.tsx src/components/
+cp -r ../sc_price_scanner/scanner-engine/ScannerDownload.tsx src/components/
 # Edit src/pages/Market.tsx to add ScanImport section
 # Create src/pages/Tools.tsx with ScannerDownload
 

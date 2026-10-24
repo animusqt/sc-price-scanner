@@ -67,6 +67,7 @@ else:
 
 calibrating = False
 calib_points = []
+last_preview_at = 0.0
 STATION_OVERRIDE = ""
 
 
@@ -164,11 +165,16 @@ def do_scan():
 
 
 def on_click(x, y, button, pressed):
-    global calibrating, calib_points
-    if not calibrating or not pressed:
+    global calibrating, calib_points, last_preview_at
+    if not calibrating or not pressed or button != mouse.Button.left:
         return
     calib_points.append((int(x), int(y)))
     if len(calib_points) == 1:
+        last_preview_at = 0.0
+        send({
+            "type": "calibration_preview",
+            "payload": {"left": int(x), "top": int(y), "width": 0, "height": 0},
+        })
         send({"type": "status", "message": "Now click BOTTOM-RIGHT of the table"})
     elif len(calib_points) == 2:
         (x1, y1), (x2, y2) = calib_points
@@ -179,6 +185,7 @@ def on_click(x, y, button, pressed):
             "height": abs(y2 - y1),
         }
         if region["width"] < 50 or region["height"] < 50:
+            send({"type": "calibration_cancelled"})
             send({"type": "status", "message": "Region too small, try again"})
         else:
             save_region(region)
@@ -187,10 +194,32 @@ def on_click(x, y, button, pressed):
         calib_points = []
 
 
+def on_move(x, y):
+    global last_preview_at
+    if not calibrating or not calib_points:
+        return
+    now = time.monotonic()
+    if now - last_preview_at < 1 / 30:
+        return
+    last_preview_at = now
+    x1, y1 = calib_points[0]
+    x2, y2 = int(x), int(y)
+    send({
+        "type": "calibration_preview",
+        "payload": {
+            "left": min(x1, x2),
+            "top": min(y1, y2),
+            "width": abs(x2 - x1),
+            "height": abs(y2 - y1),
+        },
+    })
+
+
 def start_calibration():
     global calibrating, calib_points
     calibrating = True
     calib_points = []
+    send({"type": "calibration_cancelled"})
     send({"type": "status", "message": "Click TOP-LEFT, then BOTTOM-RIGHT of the table"})
 
 
@@ -226,6 +255,11 @@ def on_press(key):
             start_calibration()
         elif key == keyboard.Key.f9:
             do_scan()
+        elif key == keyboard.Key.esc and calibrating:
+            calibrating = False
+            calib_points = []
+            send({"type": "calibration_cancelled"})
+            send({"type": "status", "message": "Calibration cancelled"})
         elif key == keyboard.Key.f10:
             send({"type": "status", "message": "Exiting"})
             return False
@@ -235,6 +269,14 @@ def on_press(key):
 
 if __name__ == "__main__":
     send({"type": "status", "message": "Bridge ready"})
+    with mss.MSS() as sct:
+        send({
+            "type": "display_layout",
+            "payload": [
+                {key: monitor[key] for key in ("left", "top", "width", "height")}
+                for monitor in sct.monitors[1:]
+            ],
+        })
     r = load_region()
     send({
         "type": "status",
@@ -242,7 +284,7 @@ if __name__ == "__main__":
     })
     send({"type": "status", "message": f"Scans folder: {SCAN_DIR}"})
 
-    mouse_listener = mouse.Listener(on_click=on_click)
+    mouse_listener = mouse.Listener(on_click=on_click, on_move=on_move)
     mouse_listener.start()
 
     stdin_thread = threading.Thread(target=handle_stdin, daemon=True)

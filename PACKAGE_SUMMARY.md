@@ -4,11 +4,7 @@
 
 ```
 sc_price_scanner/
-├── scanner.py                    # CLI Scanner (F8 calibrate, F9 scan, F10 quit)
-├── scanner_overlay_bridge.py     # Bridge for Electron (stdin/stdout JSON)
-├── build_scanner.py              # Builds both .exe files
-├── ScanImport.tsx                # React component for Market page JSON import
-├── ScannerDownload.tsx           # React component for download links
+├── Launch Overlay.bat            # One-click overlay launcher
 ├── MARKET_INTEGRATION.md         # Integration guide for your Market page
 ├── README.md                     # Build & distribution guide
 ├── electron-overlay/
@@ -18,6 +14,12 @@ sc_price_scanner/
 │   ├── overlay.html              # Overlay UI (status, controls, preview, logs)
 │   ├── overlay.css               # Dark theme styling
 │   └── renderer.js               # Frontend logic (scanner communication, UI updates)
+├── scanner-engine/
+│   ├── scanner.py                # CLI Scanner (F8 calibrate, F9 scan, F10 quit)
+│   ├── scanner_overlay_bridge.py # Bridge for Electron (stdin/stdout JSON)
+│   ├── build_scanner.py          # Builds both .exe files
+│   ├── ScanImport.tsx            # React component for Market page JSON import
+│   └── ScannerDownload.tsx       # React component for download links
 └── .github/workflows/
     └── build.yml                 # GitHub Actions: cross-platform builds + releases
 ```
@@ -26,13 +28,13 @@ sc_price_scanner/
 
 ## 🎯 What Each Piece Does
 
-### 1. **CLI Scanner** (`scanner.py` → `SC-Price-Scanner.exe`)
+### 1. **CLI Scanner** (`scanner-engine/scanner.py` → `SC-Price-Scanner.exe`)
 - **Standalone, zero dependencies** — runs on any Windows PC
 - **Hotkeys:** F8=calibrate region, F9=scan terminal, F10=quit
 - **Output:** JSON files in `Documents\SC-Truckers Scans\<Station>_<timestamp>.json`
 - **Safety:** Screen capture only (DXGI Desktop Duplication), no game injection
 
-### 2. **Overlay Bridge** (`scanner_overlay_bridge.py` → `SC-Price-Scanner-Bridge.exe`)
+### 2. **Overlay Bridge** (`scanner-engine/scanner_overlay_bridge.py` → `SC-Price-Scanner-Bridge.exe`)
 - **Same scanner logic** but speaks JSON over stdin/stdout
 - **Electron spawns it** and communicates via IPC
 - **Enables:** Real-time status in overlay, one-click scan/calibrate, auto-upload
@@ -62,19 +64,16 @@ sc_price_scanner/
 
 ```bash
 # 1. Build locally (Windows)
-cd sc_price_scanner
-python build_scanner.py
-# → dist/SC-Price-Scanner.exe + SC-Price-Scanner-Bridge.exe
+python scanner-engine/build_scanner.py
+# → scanner-engine/dist/SC-Price-Scanner.exe + SC-Price-Scanner-Bridge.exe
 
 # 2. Test CLI scanner
-dist/SC-Price-Scanner.exe
+scanner-engine/dist/SC-Price-Scanner.exe
 # Press F8 → click terminal corners → F9 on commodity kiosk
 # Check Documents\SC-Truckers Scans\*.json
 
-# 3. Test Electron overlay (dev)
-cd electron-overlay
-npm install
-npm run dev
+# 3. Launch the Electron overlay
+# Double-click "Launch Overlay.bat"
 # Window appears → click "Scan Terminal" → watch log
 
 # 4. Push to GitHub for cross-platform builds

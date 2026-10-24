@@ -1,12 +1,14 @@
 # Build artifacts
+scanner-engine/dist/
+scanner-engine/build/
 dist/
-build/
 *.spec
-tessdata/
+scanner-engine/tessdata/
 scanner_region.json
 
 # Python
 __pycache__/
+scanner-engine/__pycache__/
 *.pyc
 *.pyo
 

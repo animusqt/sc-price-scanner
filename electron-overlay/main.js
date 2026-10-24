@@ -4,6 +4,9 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 
 let overlayWindow = null;
+let regionPreviewWindow = null;
+let regionPreviewHideTimer = null;
+let physicalDisplays = [];
 let tray = null;
 let scannerProcess = null;
 let closeToTray = true;
@@ -42,6 +45,126 @@ function flushPending() {
   }
 }
 
+function ensureRegionPreviewWindow() {
+  if (regionPreviewWindow && !regionPreviewWindow.isDestroyed()) return;
+
+  regionPreviewWindow = new BrowserWindow({
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    focusable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+
+  regionPreviewWindow.loadFile(path.join(__dirname, 'region-preview.html')).catch((error) => {
+    toRenderer('scanner-log', `Could not load region preview: ${error.message}`);
+  });
+  regionPreviewWindow.setIgnoreMouseEvents(true);
+  regionPreviewWindow.setAlwaysOnTop(true, 'screen-saver');
+  if (regionPreviewWindow.setVisibleOnAllWorkspaces) {
+    regionPreviewWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
+  try { regionPreviewWindow.setContentProtection(true); } catch {}
+  regionPreviewWindow.on('closed', () => {
+    regionPreviewWindow = null;
+  });
+}
+
+function displayPoint(point) {
+  const displays = screen.getAllDisplays()
+    .sort((a, b) => a.bounds.y - b.bounds.y || a.bounds.x - b.bounds.x);
+  const monitors = physicalDisplays
+    .filter((monitor) => Number.isFinite(monitor.left) && Number.isFinite(monitor.top) &&
+      Number.isFinite(monitor.width) && Number.isFinite(monitor.height))
+    .sort((a, b) => a.top - b.top || a.left - b.left);
+  const unmatchedMonitors = [...monitors];
+  const displayByMonitor = new Map();
+  displays.forEach((display) => {
+    const scale = display.scaleFactor || 1;
+    unmatchedMonitors.sort((a, b) => {
+      const score = (monitor) =>
+        Math.abs(monitor.width - display.bounds.width * scale) +
+        Math.abs(monitor.height - display.bounds.height * scale);
+      return score(a) - score(b);
+    });
+    const match = unmatchedMonitors.shift();
+    if (match) displayByMonitor.set(match, display);
+  });
+  const physical = monitors.find((monitor) =>
+    point.x >= monitor.left && point.x < monitor.left + monitor.width &&
+    point.y >= monitor.top && point.y < monitor.top + monitor.height
+  );
+  const nearbyPhysical = physical || monitors
+    .map((monitor) => {
+      const dx = Math.max(monitor.left - point.x, 0, point.x - monitor.left - monitor.width);
+      const dy = Math.max(monitor.top - point.y, 0, point.y - monitor.top - monitor.height);
+      return { monitor, distance: dx * dx + dy * dy };
+    })
+    .sort((a, b) => a.distance - b.distance)[0]?.monitor;
+  const display = nearbyPhysical && displayByMonitor.get(nearbyPhysical);
+
+  if (nearbyPhysical && display) {
+    return {
+      x: display.bounds.x + (point.x - nearbyPhysical.left) * display.bounds.width / nearbyPhysical.width,
+      y: display.bounds.y + (point.y - nearbyPhysical.top) * display.bounds.height / nearbyPhysical.height
+    };
+  }
+
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const scale = primaryDisplay.scaleFactor || 1;
+  return { x: point.x / scale, y: point.y / scale };
+}
+
+function updateRegionPreview(region, hideAfterMs = 0) {
+  if (!region || !Number.isFinite(region.left) || !Number.isFinite(region.top) ||
+      !Number.isFinite(region.width) || !Number.isFinite(region.height)) return;
+
+  ensureRegionPreviewWindow();
+  const topLeft = displayPoint({ x: region.left, y: region.top });
+  const bottomRight = displayPoint({
+    x: region.left + region.width,
+    y: region.top + region.height
+  });
+  const windowBounds = {
+    x: Math.round(topLeft.x),
+    y: Math.round(topLeft.y),
+    width: Math.max(4, Math.round(bottomRight.x - topLeft.x)),
+    height: Math.max(4, Math.round(bottomRight.y - topLeft.y))
+  };
+  regionPreviewWindow.setBounds(windowBounds);
+  if (!regionPreviewWindow.isVisible()) regionPreviewWindow.showInactive();
+  if (regionPreviewHideTimer) clearTimeout(regionPreviewHideTimer);
+  if (hideAfterMs > 0) {
+    regionPreviewHideTimer = setTimeout(() => {
+      if (regionPreviewWindow && !regionPreviewWindow.isDestroyed()) regionPreviewWindow.hide();
+      regionPreviewHideTimer = null;
+    }, hideAfterMs);
+  }
+}
+
+function clearRegionPreview() {
+  if (regionPreviewHideTimer) {
+    clearTimeout(regionPreviewHideTimer);
+    regionPreviewHideTimer = null;
+  }
+  if (regionPreviewWindow && !regionPreviewWindow.isDestroyed()) regionPreviewWindow.hide();
+}
+
 // The Bridge build speaks the JSON stdin/stdout protocol. Prefer it; fall back
 // to the CLI build (which just responds to hotkeys) if that's all we have.
 const SCANNER_CANDIDATES = {
@@ -54,6 +177,8 @@ function resolveScannerPath() {
   const roots = [
     process.resourcesPath ? path.join(process.resourcesPath, 'scanner') : null,
     process.resourcesPath || null,
+    path.join(__dirname, '..', 'scanner-engine', 'dist'),
+    path.join(__dirname, '..', 'scanner-engine'),
     path.join(__dirname, '..', 'dist'),
     path.join(__dirname, '..', 'scanner'),
     path.join(app.getAppPath(), 'scanner'),
@@ -286,7 +411,7 @@ function launchScanner() {
   const scannerPath = resolveScannerPath();
 
   if (!scannerPath) {
-    const msg = `Scanner not found. Build it first (python build_scanner.py) or place the exe in resources/scanner/.`;
+    const msg = `Scanner not found. Build it first (python scanner-engine/build_scanner.py) or place the exe in resources/scanner/.`;
     console.error(msg);
     toRenderer('scanner-log', msg);
     return;
@@ -312,6 +437,21 @@ function launchScanner() {
         if (line.startsWith('{')) {
           try {
             const msg = JSON.parse(line);
+            if (msg.type === 'display_layout' && Array.isArray(msg.payload)) {
+              physicalDisplays = msg.payload;
+              return;
+            }
+            if (msg.type === 'calibration_preview') {
+              updateRegionPreview(msg.payload);
+              return;
+            }
+            if (msg.type === 'calibration_cancelled') {
+              clearRegionPreview();
+              return;
+            }
+            if (msg.type === 'calibration_complete') {
+              updateRegionPreview(msg.payload, 2500);
+            }
             toRenderer('scanner-output', msg);
           } catch {}
         } else {
@@ -355,6 +495,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  regionPreviewWindow?.close();
   scannerProcess?.kill();
 });
 
