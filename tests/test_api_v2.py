@@ -1,14 +1,10 @@
-import json
 import os
 import sys
-import time
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -28,12 +24,11 @@ from scip_api.models import (
     InventorySnapshot,
     Location,
     PatchVersion,
-    RefreshSession,
     Report,
     RoutePenalty,
     User,
 )
-from scip_api.security import create_access_token, hash_refresh_token, utc_after
+from scip_api.security import create_access_token
 
 
 class ApiV2Tests(unittest.TestCase):
@@ -46,7 +41,7 @@ class ApiV2Tests(unittest.TestCase):
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
         with self.Session() as session:
-            self.user = User(discord_id="123456789", username="Test Pilot", reputation=0.9)
+            self.user = User(username="Test Pilot", reputation=0.9)
             session.add(self.user)
             session.commit()
             self.user_id = self.user.id
@@ -59,11 +54,6 @@ class ApiV2Tests(unittest.TestCase):
 
         app.dependency_overrides[get_session] = override_session
         self.client = TestClient(app)
-        self.discord_signing_key = Ed25519PrivateKey.generate()
-        self.discord_public_key = self.discord_signing_key.public_key().public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw,
-        ).hex()
         self.headers = {"Authorization": f"Bearer {create_access_token(self.user_id)}"}
 
     def tearDown(self):
@@ -87,25 +77,6 @@ class ApiV2Tests(unittest.TestCase):
         data.update(overrides)
         return data
 
-    def post_discord_interaction(self, payload, *, timestamp=None, public_key=None):
-        payload.setdefault("id", str(time.time_ns()))
-        body = json.dumps(payload, separators=(",", ":")).encode()
-        signed_at = str(
-            int(datetime.now(timezone.utc).timestamp()) if timestamp is None else timestamp
-        )
-        signature = self.discord_signing_key.sign(signed_at.encode() + body).hex()
-        env = {"DISCORD_PUBLIC_KEY": public_key or self.discord_public_key}
-        with patch.dict(os.environ, env):
-            return self.client.post(
-                "/api/v2/discord/interactions",
-                content=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Signature-Ed25519": signature,
-                    "X-Signature-Timestamp": signed_at,
-                },
-            )
-
     def test_report_submission_is_authenticated_and_pending_review(self):
         unauthorized = self.client.post("/api/v2/reports", json=self.report())
         self.assertEqual(unauthorized.status_code, 401)
@@ -117,10 +88,44 @@ class ApiV2Tests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "pending")
         self.assertFalse(response.json()["duplicate"])
 
-    def test_development_app_serves_dashboard(self):
+    def test_api_root_identifies_desktop_client(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Commodity Market", response.text)
+        self.assertEqual(response.json(), {"service": "scip-api", "desktop": "apps/desktop"})
+
+    def test_discord_routes_are_not_exposed(self):
+        self.assertEqual(self.client.get("/api/v2/auth/discord/start").status_code, 404)
+        self.assertEqual(self.client.get("/api/v2/auth/discord/callback").status_code, 404)
+        self.assertEqual(self.client.post("/api/v2/discord/interactions").status_code, 404)
+
+    def test_tauri_desktop_origin_can_read_local_api(self):
+        response = self.client.options(
+            "/api/v2/markets",
+            headers={
+                "Origin": "http://tauri.localhost",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["access-control-allow-origin"],
+            "http://tauri.localhost",
+        )
+
+        blocked = self.client.options(
+            "/api/v2/markets",
+            headers={
+                "Origin": "https://untrusted.example",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        self.assertNotIn("access-control-allow-origin", blocked.headers)
+
+    def test_source_registry_is_limited_to_lovable_feed(self):
+        response = self.client.get("/api/v2/sources")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([source["key"] for source in response.json()], ["sc-truckers"])
+        self.assertFalse(response.json()[0]["enabled"])
 
     def test_client_report_id_is_idempotent(self):
         first = self.client.post(
@@ -224,6 +229,26 @@ class ApiV2Tests(unittest.TestCase):
         self.assertEqual(len(routes), 1)
         self.assertEqual(routes[0]["destination"], "Destination")
         self.assertEqual(routes[0]["quantity"], 10)
+
+        constrained = self.client.post("/api/v2/routes", json={
+            "cargo_capacity": 10,
+            "current_location": "terra gateway",
+            "available_credits": 4_999,
+            "patch_version": "4.0",
+            "server_shard": "A",
+        })
+        self.assertEqual(constrained.status_code, 200, constrained.text)
+        self.assertEqual(constrained.json()["routes"], [])
+
+        affordable = self.client.post("/api/v2/routes", json={
+            "cargo_capacity": 10,
+            "current_location": "terra gateway",
+            "available_credits": 5_000,
+            "patch_version": "4.0",
+            "server_shard": "A",
+        })
+        self.assertEqual(affordable.status_code, 200, affordable.text)
+        self.assertEqual(len(affordable.json()["routes"]), 1)
 
     def test_confirmed_bug_can_apply_reviewed_route_penalty(self):
         origin = self.client.post("/api/v2/reports", json=self.report(), headers=self.headers)
@@ -379,35 +404,6 @@ class ApiV2Tests(unittest.TestCase):
         self.assertEqual(markets.status_code, 200, markets.text)
         self.assertEqual(markets.json(), [])
 
-    def test_refresh_tokens_rotate_and_revoke_previous_token(self):
-        from scip_api.security import new_refresh_token
-
-        old_token = new_refresh_token()
-        with self.Session() as session:
-            session.add(RefreshSession(
-                token_hash=hash_refresh_token(old_token),
-                user_id=self.user_id,
-                expires_at=utc_after(600),
-            ))
-            session.commit()
-        response = self.client.post("/api/v2/auth/refresh", json={
-            "refresh_token": old_token,
-        })
-        self.assertEqual(response.status_code, 200, response.text)
-        replacement = response.json()["refresh_token"]
-        self.assertNotEqual(replacement, old_token)
-        self.assertIn("scip_refresh=", response.headers["set-cookie"])
-        replay = self.client.post("/api/v2/auth/refresh", json={"refresh_token": old_token})
-        self.assertEqual(replay.status_code, 401)
-
-    def test_oauth_state_is_signed_and_expires(self):
-        from scip_api.security import create_oauth_state, verify_oauth_state
-
-        state = create_oauth_state(now=1000)
-        self.assertTrue(verify_oauth_state(state, now=1100))
-        self.assertFalse(verify_oauth_state(state, now=1700))
-        self.assertFalse(verify_oauth_state(state + "tampered", now=1100))
-
     def test_websocket_ticket_is_single_use(self):
         ticket_response = self.client.post(
             "/api/v2/auth/websocket-ticket",
@@ -422,110 +418,6 @@ class ApiV2Tests(unittest.TestCase):
             with self.assertRaises(WebSocketDisconnect):
                 with self.client.websocket_connect(url):
                     pass
-
-    def test_discord_interactions_validate_signature_and_answer_ping(self):
-        response = self.post_discord_interaction({"type": 1})
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json(), {"type": 1})
-
-        expired = self.post_discord_interaction(
-            {"type": 1},
-            timestamp=int(datetime.now(timezone.utc).timestamp()) - 600,
-        )
-        self.assertEqual(expired.status_code, 401)
-
-        invalid_key = self.post_discord_interaction({"type": 1}, public_key="00" * 32)
-        self.assertEqual(invalid_key.status_code, 401)
-
-    def test_discord_bug_report_command_stores_report(self):
-        payload = {
-            "type": 2,
-            "member": {"user": {"id": "987654321"}},
-            "data": {
-                "name": "bug-report",
-                "options": [
-                    {"name": "category", "value": "cargo-bug"},
-                    {"name": "description", "value": "Cargo inventory disappeared after docking."},
-                ],
-            },
-        }
-        response = self.post_discord_interaction(payload)
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertIn("submitted for moderator review", response.json()["data"]["content"])
-        replay = self.post_discord_interaction(payload)
-        self.assertIn("already handled", replay.json()["data"]["content"])
-        with self.Session() as session:
-            bug = session.query(BugReport).one()
-            self.assertEqual(bug.category, "cargo-bug")
-            self.assertEqual(bug.status, "open")
-
-    def test_discord_market_command_shows_only_confirmed_reports(self):
-        submitted = self.client.post(
-            "/api/v2/reports",
-            json=self.report(),
-            headers=self.headers,
-        )
-        with self.Session() as session:
-            session.get(Report, submitted.json()["id"]).review_status = "confirmed"
-            session.commit()
-
-        response = self.post_discord_interaction({
-            "type": 2,
-            "member": {"user": {"id": "987654321"}},
-            "data": {
-                "name": "market",
-                "options": [
-                    {"name": "patch", "value": "4.0"},
-                    {"name": "shard", "value": "A"},
-                ],
-            },
-        })
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertIn("Silicon", response.json()["data"]["content"])
-        self.assertIn("buy 500", response.json()["data"]["content"])
-
-    def test_discord_bug_review_is_moderator_gated_and_applies_penalty(self):
-        with self.Session() as session:
-            location = Location(name="Levski")
-            patch_version = PatchVersion(id="4.0", label="4.0")
-            session.add_all([location, patch_version])
-            session.flush()
-            bug = BugReport(
-                category="terminal-outage",
-                location_id=location.id,
-                patch_version=patch_version.id,
-                description="Terminal outage at Levski.",
-            )
-            session.add(bug)
-            session.commit()
-            bug_id = bug.id
-
-        payload = {
-            "type": 2,
-            "member": {"user": {"id": "987654321"}},
-            "data": {
-                "name": "review-bug",
-                "options": [
-                    {"name": "bug_id", "value": bug_id},
-                    {"name": "decision", "value": "confirmed"},
-                    {"name": "route_penalty", "value": 0.4},
-                ],
-            },
-        }
-        denied = self.post_discord_interaction(payload)
-        self.assertEqual(denied.status_code, 200, denied.text)
-        self.assertIn("Moderator permissions are required", denied.json()["data"]["content"])
-
-        payload["id"] = str(time.time_ns())
-        with patch.dict(os.environ, {"SCIP_MODERATOR_DISCORD_IDS": "987654321"}):
-            approved = self.post_discord_interaction(payload)
-        self.assertEqual(approved.status_code, 200, approved.text)
-        self.assertIn("marked **confirmed**", approved.json()["data"]["content"])
-        with self.Session() as session:
-            self.assertEqual(session.get(BugReport, bug_id).status, "confirmed")
-            penalty = session.query(RoutePenalty).one()
-            self.assertEqual(penalty.penalty, 0.4)
-            self.assertTrue(penalty.is_active)
 
     def test_only_moderators_can_confirm_reports(self):
         response = self.client.post(

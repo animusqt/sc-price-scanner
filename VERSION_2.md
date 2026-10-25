@@ -1,75 +1,63 @@
 # Version 2 status
 
-Version 2 extends the local scanner toward a player-powered Star Citizen
-commodity intelligence platform. The repository now contains a runnable
-service and dashboard foundation, but it is not a hosted production service:
-real Discord credentials, a deployed server, operational monitoring, and
-authorized third-party data contracts are still required.
+SCIP V2 is transitioning from the original player-report dashboard to the
+account-free desktop intelligence client described in the product brief.
+The current React + TypeScript UI is packaged by Tauri 2 and uses the existing
+FastAPI REST API for market and route reads.
 
-## Implemented foundations
+## Implemented
 
-| Build area | Current state |
+| Area | Current state |
 |---|---|
-| Repository and shared contract | API, OCR service, dashboard, launcher copy, shared JSON report schema, CI and deployment files are in this repository. |
-| Database | SQLAlchemy model and Alembic initial migration cover users, devices, locations, commodities, patches, shards, reports, observations, inventory, confidence, route history/penalties, bugs, audit events, refresh sessions, telemetry, forecasts, supporters, WebSocket tickets, and ingestion status. |
-| Sign-in and authorization | Discord OAuth, guild/optional-role verification, signed short-lived access tokens, hashed rotating refresh tokens, moderator allow-list, and device registration. Requires operator-provided Discord configuration. |
-| Player reports and market API | Strict, bounded, idempotent report submission; per-commodity observation timestamps; reports await moderation; market views preserve patch, shard, confidence, and review context. |
-| OCR service | Bounded screenshot input and OCR result endpoint. Results require player confirmation and are never uploaded as market reports automatically. |
-| Live feed | Short-lived, one-use authenticated WebSocket tickets and in-process market report notifications. Run one API instance until a shared pub/sub transport is configured. |
-| Routes and trends | Context-matched route recommendations use confirmed, fresh reports. Stock depletion and linear forecast endpoints expose uncertainty and require sufficiently recent evidence. |
-| Bug intelligence | Community bug reports, moderator decisions, and review-linked route-risk penalties. Resolving or rejecting a bug deactivates its penalties. |
-| Dashboard and report import | Responsive web dashboard, Discord sign-in entry point, market display, and local scan JSON preview/explicit submission. It does not modify the scanner’s local file. |
-| Security and operations | Request validation, rate limiting, audit events, security headers, TLS 1.3 Caddy configuration, PostgreSQL/Redis Compose services, and encrypted SQL dump backup script. |
+| Desktop shell | Tauri 2 project, React + TypeScript interface, dark Mobiglas/terminal theme, and per-user NSIS installer target. |
+| Navigation | Dashboard, Commodities, Routes, Fleet, Analytics, Replay, and Settings, with Support SCIP contained in Settings. |
+| Account-free use | The desktop UI has no sign-in flow. Fleet profiles and appearance preferences are stored on the local device. |
+| Market display | Reads the existing API's patch/shard-separated market endpoint and shows price, stock, demand, observation freshness, and confidence. |
+| Route analysis | Sends anonymous route requests to the existing API and displays profit, reliability, risk, and time-efficiency rankings. |
+| Replay | Requests API history and renders buy/sell values as a basic timeline when history is available. |
+| Local service | Windows PowerShell startup script runs FastAPI with SQLite; narrow CORS origins support the Vite/Tauri desktop shell. |
+| Existing backend | SQLAlchemy/Alembic, PostgreSQL/Redis deployment configuration, market report records, route scoring, history and forecast primitives, and API tests are retained. |
 
-`scanner-engine/sc_analytics.py` also contains dependency-free confidence,
-weighted-median consensus, outlier, route scoring, depletion, and forecast
-primitives with deterministic tests.
+## Not production-ready
 
-## Still requires real integrations or production work
+- **Lovable synchronization is not connected.** No API URL, authorization method,
+  endpoint contract, or sample response was supplied. Existing external source
+  adapters are deliberately disabled; no endpoint behavior has been guessed.
+- **The app is not a self-contained installer yet.** Tauri's NSIS packaging is
+  configured, but it does not bundle/start FastAPI. The local service currently
+  must be started separately. Rust/MSVC/WebView2 are required to produce the
+  Windows installer.
+- Discord OAuth, guild/role verification, interaction handling, bot command
+  registration, and stored Discord user IDs have been removed. A database
+  migration retires the old interaction table and identity column; the
+  migration is intentionally irreversible because deleted identities cannot
+  be reconstructed.
+- The old protected player-report and moderator-review APIs remain as
+  transition code, but the desktop has no account flow and does not call them.
+  Replace these with the documented Lovable synchronization contract before
+  deploying a complete account-free backend.
+- Auto-updater feed/signing, local database encryption, backup/restore UI,
+  WebSocket client updates, risk-event feed integration, and production
+  forecasting validation are not implemented.
+- The desktop's route ranking views are alternate presentations of the
+  existing route response, not four independent optimization strategies.
+- Data views are empty until data is synchronized to the API. The attached
+  local scanner JSON is not imported or treated as verified market data.
 
-- The hosted Lovable website and its backend are not part of this repository.
-- Discord OAuth, guild verification, and production moderator identities need
-  a real Discord application and securely configured environment values.
-- Provider adapters are deliberately disabled. No UEX, Erkul, Hauler, SC
-  Trade Tools, or other live source is queried until its authorized API
-  contract and field mapping are configured.
-- Discord interactions support `/ping`, confirmed `/market` lookup,
-  `/bug-report`, and moderator-only `/review-bug`. The interactions endpoint
-  and command registration script need a publicly reachable HTTPS API,
-  configured public key, bot token, and guild/application setup.
-- The supporter profile is data/API scaffolding only; payments and badge
-  synchronization are not implemented.
-- Forecasting is an explainable linear baseline, not a validated economic
-  predictor. Historical reports remain player observations and should not be
-  treated as guaranteed in-game truth.
-- Multi-instance WebSocket fan-out, deployment monitoring/alerting, restore
-  drills, and production operations are not configured. Container volume
-  encryption depends on the deployment host; the backup script encrypts
-  exported SQL separately.
-- Scan import currently lives in the web dashboard, not in the Electron
-  overlay. It requires an explicit player confirmation and reports remain
-  pending until a moderator confirms them.
+## Development checks
 
-## Local service setup
+```powershell
+python -m pytest -q
+npm ci --prefix apps\desktop
+npm run build --prefix apps\desktop
+```
 
-1. Install Docker Compose and copy `.env.example` to `.env`.
-2. Set unique URL-safe database/Redis passwords and a random `JWT_SECRET` of
-   at least 32 bytes. Keep `.env` private.
-3. Configure the Discord OAuth client, redirect URI
-   (`http://localhost:8080/api/v2/auth/discord/callback` for local use), bot,
-   guild, and optional verified role.
-4. Start the stack with `docker compose up --build`.
-5. Open `http://localhost:8080`. For production, configure `SITE_DOMAIN`,
-   HTTPS callback/web URLs and production secrets, then use
-   `docker compose --profile production up --build`.
+With Rust and Windows desktop prerequisites installed, build the Windows
+installer using:
 
-The dashboard can render an empty market without Discord setup, but report
-submission requires successful Discord sign-in. The production Caddy profile
-obtains TLS certificates for the configured public domain. Do not expose the
-development profile directly to the internet.
+```powershell
+npm run tauri --prefix apps\desktop -- build
+```
 
-## Validation
-
-Run Python tests with `python -m unittest discover -s tests -v`. Validate the
-schema and launcher with the commands in the root README. Docker image and
-Compose execution must be checked in an environment where Docker is installed.
+See [apps/desktop/README.md](apps/desktop/README.md) for local run instructions
+and current limitations.

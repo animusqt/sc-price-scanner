@@ -56,28 +56,6 @@ def verify_access_token(token: str) -> dict[str, Any] | None:
         return None
 
 
-def create_oauth_state(*, now: int | None = None) -> str:
-    issued_at = int(time.time()) if now is None else now
-    nonce = secrets.token_urlsafe(24)
-    body = f"{issued_at}.{nonce}"
-    signature = hmac.new(signing_secret(), body.encode(), hashlib.sha256).digest()
-    return f"{body}.{_b64encode(signature)}"
-
-
-def verify_oauth_state(state: str, *, now: int | None = None, max_age_seconds: int = 600) -> bool:
-    try:
-        issued_at_text, nonce, signature = state.split(".")
-        issued_at = int(issued_at_text)
-        current_time = int(time.time()) if now is None else now
-        if not nonce or issued_at > current_time + 30 or current_time - issued_at > max_age_seconds:
-            return False
-        body = f"{issued_at_text}.{nonce}"
-        expected = hmac.new(signing_secret(), body.encode(), hashlib.sha256).digest()
-        return hmac.compare_digest(expected, _b64decode(signature))
-    except (ValueError, TypeError, SecurityConfigurationError):
-        return False
-
-
 def new_refresh_token() -> str:
     return secrets.token_urlsafe(48)
 

@@ -1,7 +1,5 @@
 import asyncio
-import json
 import os
-import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -11,32 +9,24 @@ from fastapi import (
     FastAPI,
     HTTPException,
     Query,
-    Request,
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 import sc_analytics
-from .auth import current_user, router as auth_router
+from .access import current_user
 from .database import Base, engine, get_session
-from .discord_interactions import (
-    MAX_INTERACTION_BODY,
-    handle_interaction,
-    parse_interaction_body,
-    verify_discord_signature,
-)
 from .limiter import RateLimitMiddleware
 from .models import (
     AuditEvent,
     BugReport,
     Commodity,
     ConfidenceScore,
-    DiscordInteraction,
     Device,
     ForecastRecord,
     InventorySnapshot,
@@ -175,8 +165,17 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
         lifespan=lifespan,
     )
     application.add_middleware(RateLimitMiddleware)
-    application.include_router(auth_router, prefix="/api/v2")
-
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://127.0.0.1:1420",
+            "http://localhost:1420",
+            "http://tauri.localhost",
+            "tauri://localhost",
+        ],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Accept", "Content-Type", "Authorization"],
+    )
     @application.middleware("http")
     async def security_headers(request, call_next):
         response = await call_next(request)
@@ -192,60 +191,14 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
     def health():
         return {"status": "ok", "service": "scip-api", "version": "2.0.0"}
 
+    @application.get("/")
+    def service_info():
+        return {"service": "scip-api", "desktop": "apps/desktop"}
+
     @application.get("/health/ready")
     def readiness(session: Session = Depends(get_session)):
         session.execute(select(1))
         return {"status": "ready", "database": "ok"}
-
-    @application.post("/api/v2/discord/interactions")
-    async def discord_interactions(
-        request: Request,
-        session: Session = Depends(get_session),
-    ):
-        content_length = request.headers.get("content-length")
-        if content_length and content_length.isdecimal() and int(content_length) > MAX_INTERACTION_BODY:
-            raise HTTPException(status_code=413, detail="Discord interaction payload is too large.")
-        body = await request.body()
-        if len(body) > MAX_INTERACTION_BODY:
-            raise HTTPException(status_code=413, detail="Discord interaction payload is too large.")
-        if not verify_discord_signature(
-            body,
-            request.headers.get("X-Signature-Ed25519"),
-            request.headers.get("X-Signature-Timestamp"),
-        ):
-            raise HTTPException(status_code=401, detail="Invalid Discord request signature.")
-        try:
-            payload = parse_interaction_body(body)
-        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="Invalid Discord interaction payload.") from exc
-        interaction_id = payload.get("id")
-        if not isinstance(interaction_id, str) or not interaction_id.isdecimal():
-            raise HTTPException(status_code=400, detail="Discord interaction ID is invalid.")
-        if session.get(DiscordInteraction, interaction_id) is not None:
-            return {
-                "type": 4,
-                "data": {
-                    "content": "This interaction was already handled.",
-                    "flags": 64,
-                    "allowed_mentions": {"parse": []},
-                },
-            }
-        session.add(DiscordInteraction(id=interaction_id))
-        try:
-            session.flush()
-        except IntegrityError:
-            session.rollback()
-            return {
-                "type": 4,
-                "data": {
-                    "content": "This interaction was already handled.",
-                    "flags": 64,
-                    "allowed_mentions": {"parse": []},
-                },
-            }
-        result = handle_interaction(payload, session)
-        session.commit()
-        return result
 
     @application.post("/api/v2/devices", status_code=201)
     def register_device(
@@ -612,8 +565,18 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
                 "patch_version": row.report.patch_version,
                 "server_shard": row.report.server_shard,
             })
-        options = payload.model_dump()
+        options = payload.model_dump(exclude={"current_location", "available_credits"})
         routes = sc_analytics.recommend_routes(markets, **options)
+        if payload.current_location:
+            routes = [
+                route for route in routes
+                if route["origin"].casefold() == payload.current_location.casefold()
+            ]
+        if payload.available_credits is not None:
+            routes = [
+                route for route in routes
+                if route["buy_price"] * route["quantity"] <= payload.available_credits
+            ]
         penalties = session.execute(
             select(Location.name, RoutePenalty.penalty)
             .join(RoutePenalty, RoutePenalty.location_id == Location.id)
@@ -895,11 +858,6 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
                 await socket.receive_text()
         except WebSocketDisconnect:
             await market_feed.disconnect(socket)
-
-    if os.environ.get("APP_ENV") != "production":
-        web_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "apps", "web"))
-        if os.path.isdir(web_root):
-            application.mount("/", StaticFiles(directory=web_root, html=True), name="dashboard")
 
     return application
 

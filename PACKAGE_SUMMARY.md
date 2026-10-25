@@ -175,7 +175,7 @@ $$;
 | DLL injection | ❌ No | — |
 | Game hooks | ❌ No | — |
 | Network interception | ❌ No | — |
-| **Screen capture (DXGI)** | ✅ Yes | **None** (same as OBS/Discord) |
+| **Screen capture (DXGI)** | ✅ Yes | **None** (same as OBS) |
 | **OCR (Tesseract)** | ✅ Yes | **None** |
 | **Hotkey listener** | ✅ Yes | **None** (standard Windows API) |
 

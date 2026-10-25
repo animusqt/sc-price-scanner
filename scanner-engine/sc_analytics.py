@@ -269,6 +269,7 @@ def recommend_routes(
                     "gross_profit": gross_profit,
                     "net_profit": net_profit,
                     "route_risk": risk,
+                    "travel_hours": hours,
                     "confidence": confidence,
                     "risk_adjusted_profit": risk_adjusted_profit,
                     "risk_adjusted_profit_per_hour": risk_adjusted_profit * confidence / hours,

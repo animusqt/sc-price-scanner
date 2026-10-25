@@ -18,6 +18,9 @@ electron-overlay/node_modules/
 electron-overlay/dist/
 apps/launcher/node_modules/
 apps/launcher/dist/
+apps/desktop/node_modules/
+apps/desktop/dist/
+apps/desktop/src-tauri/target/
 
 # OS
 .DS_Store

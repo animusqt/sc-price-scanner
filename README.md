@@ -1,6 +1,10 @@
-# SC Price Scanner
+# SCIP — Star Citizen Intelligence Platform
 
-## Launch the overlay
+The primary V2 application is the React + Tauri desktop client documented in
+[SCIP Version 2 desktop](#scip-version-2-desktop). The original OCR overlay is
+legacy tooling; it is not required to launch or use SCIP.
+
+## Legacy scanner overlay
 
 Double-click **`Launch Overlay.bat`** in the project folder. It opens the overlay directly without leaving a terminal window open. On first launch, it installs the Electron dependencies in the background.
 
@@ -14,70 +18,49 @@ For hands-free updates, choose **Start Low-Impact Live Scan**. It checks the cal
 
 ---
 
-## Version 2 platform
+## SCIP Version 2 desktop
 
-The `version-2` branch adds a FastAPI market API, PostgreSQL/Redis services,
-OCR service, and a responsive dashboard. It accepts manually reviewed player
-scan JSON, keeps reports pending moderation, separates patch/shard data, and
-only uses moderator-confirmed reports for route recommendations. See
-[VERSION_2.md](VERSION_2.md) for implemented areas and limitations.
+The `apps/desktop` directory contains the React + TypeScript desktop client
+packaged with Tauri 2 and configured to build a per-user Windows NSIS installer.
+It opens directly without an account. The interface includes
+Dashboard, Commodities, Routes, Fleet, Analytics, Replay, and Settings; fleet
+details and appearance preferences are stored locally. Support links appear
+inside Settings.
 
-### Run locally
+### Run the desktop client
 
-For a local dashboard/API check on Windows, run this from the repository:
+Start the local API in one PowerShell window:
 
 ```powershell
 .\scripts\start-local.ps1
 ```
 
-It migrates a local SQLite database and serves the dashboard/API at
-`http://127.0.0.1:8080`; press Ctrl+C to stop it. It reads only Discord-related
-settings from your ignored `.env` and generates a temporary local JWT secret if
-needed. OAuth and bot interactions require additional Discord setup below.
-
-For the full PostgreSQL/Redis/OCR stack, install Docker Compose, copy
-`.env.example` to `.env`, set strong unique database/Redis passwords and a
-random `JWT_SECRET` with at least 32 bytes, then run:
+Install Rust with the Windows MSVC toolchain and WebView2, then run the Tauri
+desktop shell in another PowerShell window:
 
 ```powershell
-docker compose up --build
+npm ci --prefix apps\desktop
+npm run tauri --prefix apps\desktop -- dev
 ```
 
-Open `http://localhost:8080`.
+The UI API defaults to `http://127.0.0.1:8080`. Create a production frontend
+build with `npm run build --prefix apps\desktop`. Build the NSIS installer with
+`npm run tauri --prefix apps\desktop -- build`.
 
-The dashboard can start without Discord credentials, but authenticated
-submission is unavailable until Discord is configured. For public deployment,
-set production secrets and `SITE_DOMAIN`, configure the public HTTPS callback
-and web URL, then start with `docker compose --profile production up --build`.
-The `gateway` profile provides Caddy TLS; do not expose the development profile
-directly to the internet.
+The desktop shell is an implementation foundation, not yet a self-contained
+production installer: the FastAPI service must currently be started separately.
+Lovable API synchronization cannot be enabled until its endpoint, authentication
+method, and response schema are provided. Provider adapters remain disabled;
+without synchronized market records, the dashboard and route planner show
+empty-state guidance. See [apps/desktop/README.md](apps/desktop/README.md) and
+[VERSION_2.md](VERSION_2.md) for current scope and limitations.
 
-### Discord bot commands
-
-The API also supports Discord's signed interactions endpoint. Create a bot
-token in the Developer Portal and place it in the ignored `.env` as
-`DISCORD_BOT_TOKEN`. Add the bot to your server with the
-`applications.commands` scope and set `DISCORD_GUILD_ID`, then run
-`python services/discord-bot/register_commands.py` to register the commands.
-In the application's General Information page, set **Interactions Endpoint
-URL** to `https://<your-public-domain>/api/v2/discord/interactions`. Discord
-must reach that HTTPS URL; localhost alone will not work. The integration
-provides `/ping`, `/market`, `/bug-report`, and moderator-only `/review-bug`.
-See [the Discord bot setup guide](services/discord-bot/README.md) for details.
-The OAuth redirect URI is a separate setting.
-
-The API, OAuth integration, authorized external market providers, moderation
-staff, and production environment must be operated/configured by the deployment
-owner. Provider adapters remain disabled until their API contracts are
-approved. WebSocket fan-out currently expects one API instance. Supporter
-payment processing and role synchronization are not included.
-
-### Version 2 checks
+### Checks
 
 ```powershell
-python -m unittest discover -s tests -v
-npm ci --prefix apps/launcher
-npm run build --prefix apps/launcher -- --dir --config.win.signAndEditExecutable=false
+python -m pytest -q
+npm ci --prefix apps\desktop
+npm run build --prefix apps\desktop
 ```
 
 ---
@@ -133,7 +116,7 @@ Add `electron-updater` style checks or simple version JSON on your CDN.
 
 | Concern | Reality |
 |---------|---------|
-| **Ban risk** | Near-zero. Uses Windows Desktop Duplication API (same as OBS/Discord). No memory reads, no hooks, no injection. |
+| **Ban risk** | Near-zero. Uses Windows Desktop Duplication API (same technology as OBS). No memory reads, no hooks, no injection. |
 | **Admin rights** | Not required. Runs as standard user. |
 | **Antivirus** | May flag unsigned exe. Solution: code-signing cert (~$200/yr) or user adds exception. |
 | **Performance** | OCR runs only for manual scans or stable live-mode changes. Live mode samples the calibrated region every 2 seconds and limits OCR scans to one per 15 seconds. |
@@ -186,21 +169,11 @@ SCAN_DIR = Path.home() / "OneDrive" / "Documents" / "SC-Truckers Scans"
 sc_price_scanner/
 ├── Launch Overlay.bat  # One-click launcher
 ├── apps/
-│   ├── launcher/       # Version 2 Electron launcher source
-│   ├── web/            # Market dashboard
+│   ├── desktop/        # React + TypeScript / Tauri desktop app
+│   ├── launcher/       # Legacy Electron overlay launcher source
 │   └── ...
 ├── electron-overlay/   # Legacy overlay source; retained for compatibility
-├── services/           # Version 2 API, OCR and web deployment services
+├── services/           # Version 2 API and OCR services
 ├── scanner-engine/     # Python scanner, bridge, and build files
 └── README.md
 ```
-
----
-
-## Next Steps for Your Site
-
-1. **Add Import component** (see previous message)
-2. **Validate scan schema** on backend
-3. **Show contributor credit**: "Updated by CMDR_John 3m ago via local scan"
-4. **Leaderboard**: Top scanners this week
-5. **Discord webhook**: Auto-post new high-margin routes

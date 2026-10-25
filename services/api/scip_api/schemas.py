@@ -102,6 +102,8 @@ class RefreshRequest(StrictSchema):
 
 class RouteRequest(StrictSchema):
     cargo_capacity: float = Field(gt=0, le=1_000_000)
+    current_location: str | None = Field(default=None, max_length=160)
+    available_credits: float | None = Field(default=None, ge=0, le=1_000_000_000_000)
     fuel_cost: float = Field(default=0, ge=0)
     route_fees: float = Field(default=0, ge=0)
     route_risk: float = Field(default=0, ge=0, le=1)
@@ -109,6 +111,14 @@ class RouteRequest(StrictSchema):
     minimum_confidence: float = Field(default=0, ge=0, le=1)
     server_shard: str = Field(min_length=1, max_length=100)
     patch_version: str = Field(min_length=1, max_length=80)
+
+    @field_validator("current_location")
+    @classmethod
+    def trim_current_location(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
 
 class BugReportCreate(StrictSchema):

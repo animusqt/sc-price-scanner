@@ -15,12 +15,12 @@ class Provider:
 
 
 PROVIDER_CONFIG = (
-    ("uex", "UEX", "UEX_API_BASE_URL", "UEX_API_DOCUMENTATION_URL"),
-    ("sc-trade-tools", "SC Trade Tools", "SC_TRADE_TOOLS_API_BASE_URL", "SC_TRADE_TOOLS_API_DOCUMENTATION_URL"),
-    ("hauler", "Hauler", "HAULER_API_BASE_URL", "HAULER_API_DOCUMENTATION_URL"),
-    ("sc-truckers", "SC-Truckers", "SC_TRUCKERS_API_BASE_URL", "SC_TRUCKERS_API_DOCUMENTATION_URL"),
-    ("erkul", "Erkul", "ERKUL_API_BASE_URL", "ERKUL_API_DOCUMENTATION_URL"),
-    ("wiki", "Star Citizen Wiki", "SC_WIKI_API_BASE_URL", "SC_WIKI_API_DOCUMENTATION_URL"),
+    (
+        "sc-truckers",
+        "SC-Truckers Lovable",
+        "SC_TRUCKERS_API_BASE_URL",
+        "SC_TRUCKERS_API_DOCUMENTATION_URL",
+    ),
 )
 
 
