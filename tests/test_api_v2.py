@@ -117,6 +117,11 @@ class ApiV2Tests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "pending")
         self.assertFalse(response.json()["duplicate"])
 
+    def test_development_app_serves_dashboard(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Commodity Market", response.text)
+
     def test_client_report_id_is_idempotent(self):
         first = self.client.post(
             "/api/v2/reports", json=self.report(), headers=self.headers

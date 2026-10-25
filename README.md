@@ -24,13 +24,26 @@ only uses moderator-confirmed reports for route recommendations. See
 
 ### Run locally
 
-1. Install Docker Compose and copy `.env.example` to `.env`.
-2. Set strong, unique URL-safe values for the database and Redis passwords,
-   plus a random `JWT_SECRET` with at least 32 bytes.
-3. For Discord sign-in and report submission, configure the Discord client,
-   public key, bot, guild, and optional verified role. Set the local callback URL to
-   `http://localhost:8080/api/v2/auth/discord/callback`.
-4. Run `docker compose up --build` and open `http://localhost:8080`.
+For a local dashboard/API check on Windows, run this from the repository:
+
+```powershell
+.\scripts\start-local.ps1
+```
+
+It migrates a local SQLite database and serves the dashboard/API at
+`http://127.0.0.1:8080`; press Ctrl+C to stop it. It reads only Discord-related
+settings from your ignored `.env` and generates a temporary local JWT secret if
+needed. OAuth and bot interactions require additional Discord setup below.
+
+For the full PostgreSQL/Redis/OCR stack, install Docker Compose, copy
+`.env.example` to `.env`, set strong unique database/Redis passwords and a
+random `JWT_SECRET` with at least 32 bytes, then run:
+
+```powershell
+docker compose up --build
+```
+
+Open `http://localhost:8080`.
 
 The dashboard can start without Discord credentials, but authenticated
 submission is unavailable until Discord is configured. For public deployment,

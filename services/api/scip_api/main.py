@@ -15,6 +15,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -894,6 +895,11 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
                 await socket.receive_text()
         except WebSocketDisconnect:
             await market_feed.disconnect(socket)
+
+    if os.environ.get("APP_ENV") != "production":
+        web_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "apps", "web"))
+        if os.path.isdir(web_root):
+            application.mount("/", StaticFiles(directory=web_root, html=True), name="dashboard")
 
     return application
 

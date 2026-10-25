@@ -7,6 +7,21 @@ moderator-only `/review-bug`.
 
 ## Configure the Discord application
 
+### Create server channels
+
+In Discord, open **Server Settings → Channels** (or create channels from the
+server's channel list) and create a `SCIP` category with:
+
+- `#bot-commands` — members can send slash commands; keep bot replies ephemeral.
+- `#market-reports` — community discussion or links to scan submissions.
+- `#bug-reports` — discussion around reported bugs.
+- `#announcements` — read-only for members if you plan to post release news.
+
+The current slash commands reply ephemerally and do not post automatically to
+these channels. Restrict `/review-bug` using **Server Settings → Integrations →
+SCIP Bot → Commands** so only moderators can run it; the API independently
+checks the configured moderator allow-list.
+
 1. In the Discord Developer Portal, open the application and its **General
    Information** page. Set `DISCORD_CLIENT_ID` to the Application ID and
    `DISCORD_PUBLIC_KEY` to its Public Key in the private root `.env`.
