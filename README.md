@@ -72,6 +72,21 @@ JSON envelope; proprietary provider response formats are not guessed or
 silently mapped. A provider-specific mapping can be added once its API
 documentation and response contract are available.
 
+For a Lovable project backed by Supabase, configure
+`SCIP_IMPORT_LOVABLE_URL` with the Supabase project URL,
+`SCIP_IMPORT_LOVABLE_ALLOWED_HOST` with its exact project hostname, and
+`SCIP_IMPORT_LOVABLE_TOKEN` with a suitable public anon/publishable key. The
+sync reads the `commodities` and `ships` REST tables using their documented SCIP
+column names, applies the database's existing validation, and records a single
+import-history entry. The key stays in the API server environment; do not place
+it in desktop settings or source control. Supabase row-level security must
+permit the configured key to read both tables. If the Lovable project uses
+different table names or columns, its schema or a redacted API response is
+needed before adding a correct mapping. Add the settings to the local `.env`,
+restart `scripts\start-local.ps1`, then choose **Data Import → Lovable Market
+API → Sync now**. Docker Compose passes the same three settings to the API
+container.
+
 Install Rust with the Windows MSVC toolchain and WebView2, then run the Tauri
 desktop shell in another PowerShell window:
 

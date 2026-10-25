@@ -271,7 +271,11 @@ class ApiImporter(CatalogImporter):
         headers = {"Accept": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
+            if self.source_key == "lovable":
+                headers["apikey"] = token
         try:
+            if self.source_key == "lovable":
+                return await self._fetch_lovable_catalog(url, headers)
             async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
                 async with client.stream("GET", url, headers=headers) as response:
                     response.raise_for_status()
@@ -291,6 +295,83 @@ class ApiImporter(CatalogImporter):
             raise ValueError(f"{self.display_name} API returned HTTP {exc.response.status_code}.") from exc
         except httpx.RequestError as exc:
             raise ValueError(f"{self.display_name} API could not be reached.") from exc
+
+    async def _fetch_lovable_catalog(self, configured_url: str, headers: dict[str, str]) -> object:
+        base_url = configured_url.rstrip("/")
+        if not base_url.endswith("/rest/v1"):
+            base_url = f"{base_url}/rest/v1"
+        results: dict[str, list[object]] = {}
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+                for table in ("commodities", "ships"):
+                    table_rows: list[object] = []
+                    total_bytes = 0
+                    while len(table_rows) < MAX_IMPORT_RECORDS:
+                        page_size = min(1000, MAX_IMPORT_RECORDS - len(table_rows))
+                        request_headers = {
+                            **headers,
+                            "Range": f"{len(table_rows)}-{len(table_rows) + page_size - 1}",
+                            "Prefer": "count=exact",
+                        }
+                        async with client.stream(
+                            "GET",
+                            f"{base_url}/{table}",
+                            params={"select": "*"},
+                            headers=request_headers,
+                        ) as response:
+                            response.raise_for_status()
+                            content_type = response.headers.get("content-type", "")
+                            if "json" not in content_type.lower():
+                                raise ValueError(f"Lovable {table} endpoint did not return JSON.")
+                            content_range = response.headers.get("content-range", "")
+                            total = content_range.rsplit("/", 1)[-1]
+                            if total.isdigit() and int(total) > MAX_IMPORT_RECORDS:
+                                raise ValueError(
+                                    f"Lovable {table} catalog exceeds the {MAX_IMPORT_RECORDS} row limit."
+                                )
+                            body = bytearray()
+                            async for chunk in response.aiter_bytes():
+                                total_bytes += len(chunk)
+                                if total_bytes > MAX_IMPORT_BYTES:
+                                    raise ValueError(
+                                        f"Lovable {table} catalog exceeds the 10 MiB size limit."
+                                    )
+                                body.extend(chunk)
+                        try:
+                            page_rows = json.loads(body)
+                        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                            raise ValueError(
+                                f"Lovable {table} endpoint returned invalid JSON."
+                            ) from exc
+                        if not isinstance(page_rows, list):
+                            raise ValueError(f"Lovable {table} endpoint must return a JSON array.")
+                        if any(not isinstance(row, dict) for row in page_rows):
+                            raise ValueError(f"Lovable {table} endpoint must return an array of objects.")
+                        allowed_fields = (
+                            CommodityImport.model_fields
+                            if table == "commodities"
+                            else ShipImport.model_fields
+                        )
+                        page_rows = [
+                            {key: value for key, value in row.items() if key in allowed_fields}
+                            for row in page_rows
+                        ]
+                        table_rows.extend(page_rows)
+                        if not page_rows or len(page_rows) < page_size:
+                            break
+                        if total.isdigit() and len(table_rows) >= int(total):
+                            break
+                    results[table] = table_rows
+        except httpx.HTTPStatusError as exc:
+            table = exc.request.url.path.rsplit("/", 1)[-1]
+            raise ValueError(
+                f"Lovable {table} endpoint returned HTTP {exc.response.status_code}."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ValueError("Lovable catalog API could not be reached.") from exc
+        if not any(results.values()):
+            raise ValueError("Lovable returned no commodity or ship records.")
+        return results
 
 
 API_IMPORTERS = {

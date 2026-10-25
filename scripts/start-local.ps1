@@ -4,7 +4,7 @@ Set-Location -LiteralPath $root
 
 if (Test-Path -LiteralPath (Join-Path $root ".env")) {
     foreach ($line in Get-Content -LiteralPath (Join-Path $root ".env")) {
-        if ($line -match '^\s*(SC_TRUCKERS_API_BASE_URL|SC_TRUCKERS_API_TOKEN|TESSERACT_CMD)\s*=\s*(.*)\s*$') {
+        if ($line -match '^\s*(SC_TRUCKERS_API_BASE_URL|SC_TRUCKERS_API_TOKEN|SCIP_IMPORT_[A-Z0-9_]+|TESSERACT_CMD)\s*=\s*(.*)\s*$') {
             $name = $Matches[1]
             $value = $Matches[2].Trim()
             if ($value.Length -ge 2 -and $value.StartsWith('"') -and $value.EndsWith('"')) {

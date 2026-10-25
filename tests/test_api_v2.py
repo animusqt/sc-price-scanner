@@ -297,6 +297,69 @@ class ApiV2Tests(unittest.TestCase):
         with patch.dict(os.environ, {"SCIP_IMPORT_UEX_URL": "https://api.uexcorp.space/data"}):
             self.assertEqual(importer.configured_url(), "https://api.uexcorp.space/data")
 
+    def test_lovable_import_reads_supabase_commodity_and_ship_tables(self):
+        original_async_client = httpx.AsyncClient
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            self.assertEqual(request.url.query, b"select=%2A")
+            self.assertEqual(request.headers["apikey"], "local-test-anon-key")
+            self.assertEqual(
+                request.headers["authorization"],
+                "Bearer local-test-anon-key",
+            )
+            if request.url.path.endswith("/commodities"):
+                rows = [{
+                    "id": "website-commodity-id",
+                    "name": "Lovable Silicon",
+                    "category": "Mineral",
+                    "base_price": 500,
+                    "created_at": "2026-10-25T12:00:00Z",
+                }]
+            else:
+                rows = [{
+                    "id": "website-ship-id",
+                    "name": "Lovable Hauler",
+                    "manufacturer": "Test Foundry",
+                    "role": "Transport",
+                    "cargo_capacity_scu": 320,
+                    "crew_min": 2,
+                    "crew_max": 4,
+                    "price_auec": 5_000_000,
+                    "created_at": "2026-10-25T12:00:00Z",
+                }]
+            return httpx.Response(
+                200,
+                json=rows,
+                headers={"content-range": "0-0/1"},
+            )
+
+        def client_factory(**kwargs):
+            return original_async_client(
+                transport=httpx.MockTransport(handler),
+                **kwargs,
+            )
+
+        with patch.dict(os.environ, {
+            "SCIP_IMPORT_LOVABLE_URL": "https://project.supabase.co",
+            "SCIP_IMPORT_LOVABLE_ALLOWED_HOST": "project.supabase.co",
+            "SCIP_IMPORT_LOVABLE_TOKEN": "local-test-anon-key",
+        }), patch("scip_api.catalog_importers.httpx.AsyncClient", side_effect=client_factory):
+            response = self.client.post("/api/v2/imports/api/lovable")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["created"], 2)
+        self.assertEqual(
+            {request.url.path.rsplit("/", 1)[-1] for request in seen},
+            {"commodities", "ships"},
+        )
+        commodities = self.client.get("/api/v2/catalog/commodities").json()
+        self.assertEqual(commodities[0]["name"], "Lovable Silicon")
+        ships = self.client.get("/api/v2/ships").json()
+        self.assertEqual(ships[0]["name"], "Lovable Hauler")
+        self.assertEqual(ships[0]["cargo_capacity_scu"], 320)
+
     def test_fleet_mutation_methods_are_allowed_by_desktop_cors(self):
         for method in ("PUT", "DELETE"):
             response = self.client.options(

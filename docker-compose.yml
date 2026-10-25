@@ -39,6 +39,9 @@ services:
       SCIP_OCR_SERVICE_URL: http://ocr:8001
       SC_TRUCKERS_API_BASE_URL: ${SC_TRUCKERS_API_BASE_URL:-}
       SC_TRUCKERS_API_TOKEN: ${SC_TRUCKERS_API_TOKEN:-}
+      SCIP_IMPORT_LOVABLE_URL: ${SCIP_IMPORT_LOVABLE_URL:-}
+      SCIP_IMPORT_LOVABLE_ALLOWED_HOST: ${SCIP_IMPORT_LOVABLE_ALLOWED_HOST:-}
+      SCIP_IMPORT_LOVABLE_TOKEN: ${SCIP_IMPORT_LOVABLE_TOKEN:-}
     command: ["sh", "-c", "alembic -c services/api/alembic.ini upgrade head && uvicorn scip_api.main:app --host 0.0.0.0 --port 8000"]
     depends_on:
       db:
