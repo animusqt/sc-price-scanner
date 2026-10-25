@@ -1,24 +1,57 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { API_BASE, getHistory, getMarkets, getRoutes, getSources } from "./api";
-import type { HistoryPoint, MarketRow, Route, Ship, SourceStatus } from "./types";
+import {
+  API_BASE,
+  getHistory,
+  getMarkets,
+  getRoutes,
+  getSources,
+  scanOcrImage,
+  submitOcrReport,
+} from "./api";
+import type {
+  HistoryPoint,
+  MarketRow,
+  OcrCommodity,
+  OcrReport,
+  OcrScanResult,
+  PendingOcrUpload,
+  Route,
+  Ship,
+  SourceStatus,
+} from "./types";
 
-type Page = "Dashboard" | "Commodities" | "Routes" | "Fleet" | "Analytics" | "Replay" | "Settings";
+type Page = "Dashboard" | "Commodities" | "OCR Upload" | "Routes" | "Fleet" | "Analytics" | "Replay" | "Settings";
 type Theme = "dark" | "light";
 
 const pages: Page[] = [
   "Dashboard",
   "Commodities",
+  "OCR Upload",
   "Routes",
   "Fleet",
   "Analytics",
   "Replay",
   "Settings",
 ];
+const pageIcons = ["◈", "▦", "⌗", "⌁", "◇", "▤", "◷", "⚙"];
+const ocrQueueKey = "scip.ocr.queue";
 const money = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const defaultShip: Ship[] = [
   { id: "starter", name: "My ship", capacity: 100, favorite: true, notes: "" },
 ];
+
+function readOcrQueue(): { items: PendingOcrUpload[]; error: string } {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(ocrQueueKey) || "[]");
+    if (Array.isArray(saved) && saved.every(isPendingOcrUpload)) {
+      return { items: saved, error: "" };
+    }
+    return { items: [], error: "The saved OCR queue is invalid. Its local data was left untouched." };
+  } catch {
+    return { items: [], error: "The saved OCR queue could not be read. Its local data was left untouched." };
+  }
+}
 
 function readShips(): Ship[] {
   try {
@@ -37,6 +70,96 @@ function readTheme(): Theme {
 function marketPrice(values: MarketRow["buy"]): number | null {
   if (!values.length) return null;
   return values.reduce((total, value) => total + value.value, 0) / values.length;
+}
+
+function isPendingOcrUpload(value: unknown): value is PendingOcrUpload {
+  if (typeof value !== "object" || value === null) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.id === "string"
+    && typeof item.created_at === "string"
+    && typeof item.last_error === "string"
+    && typeof item.report === "object"
+    && item.report !== null;
+}
+
+function imageFileToBase64(file: File): Promise<string> {
+  if (file.size > 20 * 1024 * 1024) {
+    return Promise.reject(new Error("Screenshots must be 20 MiB or smaller."));
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("The screenshot file could not be read."));
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("The screenshot could not be encoded."));
+        return;
+      }
+      resolve(reader.result.slice(reader.result.indexOf(",") + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function captureScreenAsBase64(): Promise<string> {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    return Promise.reject(new Error("Screen capture is not available in this webview. Upload a screenshot file instead."));
+  }
+  return navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }).then(async (stream) => {
+    const video = document.createElement("video");
+    video.srcObject = stream;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error("The selected screen could not be read."));
+      });
+      await video.play();
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext("2d");
+      if (!context || canvas.width < 200 || canvas.height < 200) {
+        throw new Error("The selected screen is too small to scan.");
+      }
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((image) => image ? resolve(image) : reject(new Error("Could not capture the selected screen.")), "image/jpeg", 0.92);
+      });
+      return imageFileToBase64(new File([blob], "screen-capture.jpg", { type: "image/jpeg" }));
+    } finally {
+      stream.getTracks().forEach((track) => track.stop());
+      video.srcObject = null;
+    }
+  });
+}
+
+function reportValidationError(report: OcrReport): string {
+  if (!report.location.trim()) return "Enter the market location before uploading.";
+  if (!report.patch_version.trim() || !report.server_shard.trim()) return "Patch and server shard are required.";
+  if (!Number.isFinite(report.ocr_confidence) || report.ocr_confidence < 0 || report.ocr_confidence > 1) {
+    return "OCR confidence must be between 0 and 1.";
+  }
+  if (report.commodities.length === 0 || report.commodities.length > 500) {
+    return "The scan must contain between 1 and 500 commodity rows.";
+  }
+  for (const [index, row] of report.commodities.entries()) {
+    if (!row.commodity.trim() || row.commodity.length > 160) {
+      return `Commodity row ${index + 1} needs a name no longer than 160 characters.`;
+    }
+    const values = [row.buy, row.sell, row.stock, row.demand];
+    if (values.every((value) => value === null)) return `${row.commodity} has no numeric market value.`;
+    if (values.some((value) => value !== null && (!Number.isInteger(value) || value < 0 || value > 1_000_000_000))) {
+      return `${row.commodity} has an invalid price, supply, or demand value.`;
+    }
+  }
+  return "";
+}
+
+function formatOcrFailure(cause: unknown, fallback: string): string {
+  const message = cause instanceof Error ? cause.message : fallback;
+  return /(?:^|\b)(400|413|422):|validation error/i.test(message)
+    ? `Data Validation Error: ${message}`
+    : `Upload Failed · ${message}`;
 }
 
 function App() {
@@ -69,6 +192,21 @@ function App() {
   const [selectedShipId, setSelectedShipId] = useState(() => ships[0]?.id ?? "");
   const [newShipName, setNewShipName] = useState("");
   const [backupStatus, setBackupStatus] = useState("");
+  const [ocrScan, setOcrScan] = useState<OcrScanResult | null>(null);
+  const [ocrLocation, setOcrLocation] = useState("");
+  const [autoOcrUpload, setAutoOcrUpload] = useState(
+    () => localStorage.getItem("scip.ocr.autoUpload") === "true",
+  );
+  const [ocrMinimumConfidence, setOcrMinimumConfidence] = useState(() => {
+    const value = Number(localStorage.getItem("scip.ocr.minimumConfidence") || "0.75");
+    return Number.isFinite(value) && value >= 0 && value <= 1 ? value : 0.75;
+  });
+  const [ocrMessage, setOcrMessage] = useState("F9 captures the selected screen while SCIP is focused. You can also upload a screenshot.");
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrUploadBusy, setOcrUploadBusy] = useState(false);
+  const [ocrQueueState, setOcrQueueState] = useState(readOcrQueue);
+  const ocrQueueRef = useRef(ocrQueueState);
+  const pendingOcrUploads = ocrQueueState.items;
 
   const refresh = useCallback(async () => {
     setError("");
@@ -108,6 +246,11 @@ function App() {
   }, [notificationsEnabled]);
 
   useEffect(() => {
+    localStorage.setItem("scip.ocr.autoUpload", String(autoOcrUpload));
+    localStorage.setItem("scip.ocr.minimumConfidence", String(ocrMinimumConfidence));
+  }, [autoOcrUpload, ocrMinimumConfidence]);
+
+  useEffect(() => {
     localStorage.setItem("scip.patch", patch);
     localStorage.setItem("scip.shard", shard);
   }, [patch, shard]);
@@ -124,6 +267,164 @@ function App() {
     () => [...new Set(markets.map((row) => row.location))].sort(),
     [markets],
   );
+
+  function saveOcrQueue(items: PendingOcrUpload[]) {
+    try {
+      localStorage.setItem(ocrQueueKey, JSON.stringify(items));
+      const next = { items, error: "" };
+      ocrQueueRef.current = next;
+      setOcrQueueState(next);
+      return true;
+    } catch {
+      setOcrQueueState((current) => ({
+        ...current,
+        error: "Could not save the OCR upload queue locally. Upload was not attempted.",
+      }));
+      return false;
+    }
+  }
+
+  function makeOcrReport(scan: OcrScanResult): OcrReport {
+    return {
+      client_report_id: crypto.randomUUID(),
+      location: ocrLocation.trim(),
+      patch_version: patch.trim(),
+      server_shard: shard.trim(),
+      observed_at: new Date().toISOString(),
+      ocr_confidence: scan.quality.ocr_confidence,
+      source: "player-scan",
+      commodities: scan.commodities.map((row) => ({
+        commodity: row.commodity,
+        buy: row.buy,
+        sell: row.sell,
+        stock: row.stock,
+        demand: row.demand,
+        ...(row.demand_label ? { demand_label: row.demand_label } : {}),
+      })),
+      inventory: [],
+    };
+  }
+
+  async function sendOcrReport(report: OcrReport, queuedId?: string) {
+    const validationError = reportValidationError(report);
+    if (validationError) {
+      setOcrMessage(`Data Validation Error: ${validationError}`);
+      return;
+    }
+    if (!queuedId) {
+      const queueItem: PendingOcrUpload = {
+        id: report.client_report_id,
+        report,
+        created_at: new Date().toISOString(),
+        last_error: "",
+      };
+      if (!saveOcrQueue([...ocrQueueRef.current.items, queueItem])) return;
+      queuedId = queueItem.id;
+    }
+    setOcrUploadBusy(true);
+    setOcrMessage("Uploading scan to SC-Truckers…");
+    try {
+      const response = await submitOcrReport(report);
+      saveOcrQueue(ocrQueueRef.current.items.filter((item) => item.id !== queuedId));
+      setOcrMessage(`Upload Successful · ${JSON.stringify(response.confirmation)}`);
+      void refresh();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "The upload failed.";
+      const updatedQueue = ocrQueueRef.current.items.map((item) =>
+        item.id === queuedId ? { ...item, last_error: message } : item,
+      );
+      saveOcrQueue(updatedQueue);
+      setOcrMessage(message.toLowerCase().includes("422") || message.toLowerCase().includes("validation")
+        ? `Data Validation Error: ${message}`
+        : `Upload Failed · ${message}. The scan is saved in the local retry queue.`);
+    } finally {
+      setOcrUploadBusy(false);
+    }
+  }
+
+  async function processOcrImage(imageBase64: string) {
+    setOcrBusy(true);
+    setOcrScan(null);
+    setOcrMessage("Extracting and checking market values…");
+    try {
+      const result = await scanOcrImage(imageBase64);
+      setOcrScan(result);
+      if (!result.commodities.length) {
+        const ocrError = result.diagnostics?.errors?.[0]?.error;
+        setOcrMessage(ocrError
+          ? `Data Validation Error: OCR did not complete: ${ocrError}`
+          : "Data Validation Error: No commodity rows were recognized. Try another screenshot.");
+      } else if (autoOcrUpload) {
+        if (result.quality.ocr_confidence < ocrMinimumConfidence) {
+          setOcrMessage(`Data Validation Error: OCR confidence ${Math.round(result.quality.ocr_confidence * 100)}% is below the automatic upload threshold. Review and upload manually.`);
+        } else {
+          await sendOcrReport(makeOcrReport(result));
+        }
+      } else {
+        setOcrMessage(`OCR complete · ${result.commodities.length} rows · ${Math.round(result.quality.ocr_confidence * 100)}% confidence. Review before uploading.`);
+      }
+    } catch (cause) {
+      setOcrMessage(formatOcrFailure(cause, "OCR processing failed."));
+    } finally {
+      setOcrBusy(false);
+    }
+  }
+
+  const captureAndScan = useCallback(async () => {
+    setPage("OCR Upload");
+    if (ocrBusy || ocrUploadBusy) return;
+    try {
+      await processOcrImage(await captureScreenAsBase64());
+    } catch (cause) {
+      setOcrMessage(cause instanceof Error ? cause.message : "Screen capture failed.");
+    }
+  }, [ocrBusy, ocrUploadBusy, autoOcrUpload, ocrMinimumConfidence, ocrLocation, patch, shard]);
+
+  useEffect(() => {
+    const onHotkey = (event: KeyboardEvent) => {
+      if (event.key === "F9" && !event.repeat) {
+        event.preventDefault();
+        void captureAndScan();
+      }
+    };
+    window.addEventListener("keydown", onHotkey);
+    return () => window.removeEventListener("keydown", onHotkey);
+  }, [captureAndScan]);
+
+  async function uploadScreenshotFile(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setOcrMessage("Data Validation Error: Choose a screenshot image file.");
+      return;
+    }
+    setOcrBusy(true);
+    try {
+      await processOcrImage(await imageFileToBase64(file));
+    } catch (cause) {
+      setOcrMessage(formatOcrFailure(cause, "Screenshot OCR failed."));
+    } finally {
+      setOcrBusy(false);
+    }
+  }
+
+  async function retryOcrUploads() {
+    for (const item of ocrQueueRef.current.items) {
+      if (ocrUploadBusy) return;
+      await sendOcrReport(item.report, item.id);
+    }
+  }
+
+  function updateOcrCommodity(index: number, field: keyof OcrCommodity, value: string) {
+    setOcrScan((current) => current ? {
+      ...current,
+      commodities: current.commodities.map((row, rowIndex) => {
+        if (rowIndex !== index) return row;
+        if (field === "commodity") return { ...row, commodity: value };
+        if (field === "demand_label") return { ...row, demand_label: value || null };
+        return { ...row, [field]: value === "" ? null : Number(value) };
+      }),
+    } : current);
+  }
 
   async function calculateRoutes(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -199,6 +500,8 @@ function App() {
       patch,
       shard,
       ships,
+      autoOcrUpload,
+      ocrMinimumConfidence,
     };
     const link = document.createElement("a");
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
@@ -234,6 +537,18 @@ function App() {
       }
       if ("patch" in backup && typeof backup.patch === "string") setPatch(backup.patch.slice(0, 80));
       if ("shard" in backup && typeof backup.shard === "string") setShard(backup.shard.slice(0, 100));
+      if ("autoOcrUpload" in backup && typeof backup.autoOcrUpload === "boolean") {
+        setAutoOcrUpload(backup.autoOcrUpload);
+      }
+      if (
+        "ocrMinimumConfidence" in backup &&
+        typeof backup.ocrMinimumConfidence === "number" &&
+        Number.isFinite(backup.ocrMinimumConfidence) &&
+        backup.ocrMinimumConfidence >= 0 &&
+        backup.ocrMinimumConfidence <= 1
+      ) {
+        setOcrMinimumConfidence(backup.ocrMinimumConfidence);
+      }
       setBackupStatus("Settings and fleet restored from backup.");
     } catch (cause) {
       setBackupStatus(cause instanceof Error ? cause.message : "Could not restore this backup.");
@@ -266,9 +581,10 @@ function App() {
               key={item}
               onClick={() => setPage(item)}
             >
-              <span className="nav-icon">{["◈", "▦", "⌁", "◇", "▤", "◷", "⚙"][index]}</span>
+              <span className="nav-icon">{pageIcons[index]}</span>
               {item}
               {item === "Routes" && routes.length > 0 && <span className="nav-count">{routes.length}</span>}
+              {item === "OCR Upload" && pendingOcrUploads.length > 0 && <span className="nav-count">{pendingOcrUploads.length}</span>}
             </button>
           ))}
         </nav>
@@ -301,7 +617,7 @@ function App() {
             </div>
             <div className="section-heading"><div><span className="eyebrow">MARKET SNAPSHOT</span><h2>Market overview</h2></div><button className="text-button" onClick={() => setPage("Commodities")}>Explore commodities →</button></div>
             <MarketTable rows={markets.slice(0, 12)} />
-            <div className="empty-hint">Market collection, OCR validation, and supply submissions are managed by the SC-Truckers platform. SCIP reads market data and builds logistics intelligence from it.</div>
+            <div className="empty-hint">SCIP can capture, validate, and submit market OCR directly to SC-Truckers. The website remains the source of truth; synchronized market values appear here after the platform accepts and reviews reports.</div>
           </section>
         )}
 
@@ -309,6 +625,62 @@ function App() {
           <section className="page-content">
             <div className="section-heading"><div><span className="eyebrow">PRICE · SUPPLY · DEMAND</span><h2>Commodity explorer</h2></div><input className="search" aria-label="Search commodities" placeholder="Search commodity or location" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
             <MarketTable rows={commodities} />
+          </section>
+        )}
+
+        {page === "OCR Upload" && (
+          <section className="page-content">
+            <div className="section-heading">
+              <div><span className="eyebrow">SCREEN CAPTURE · REVIEW · SUBMIT</span><h2>OCR uploader</h2></div>
+              <span className="eyebrow">HOTKEY F9</span>
+            </div>
+            <div className="panel ocr-controls">
+              <div className="ocr-actions">
+                <button className="primary-button" disabled={ocrBusy || ocrUploadBusy} onClick={() => void captureAndScan()}>Capture screen and scan</button>
+                <label className="secondary-button file-button">Upload screenshot<input type="file" accept="image/*" disabled={ocrBusy || ocrUploadBusy} onChange={(event) => {
+                  void uploadScreenshotFile(event.target.files?.[0]);
+                  event.currentTarget.value = "";
+                }} /></label>
+                <button className="secondary-button" disabled={!pendingOcrUploads.length || ocrUploadBusy} onClick={() => void retryOcrUploads()}>Retry failed uploads ({pendingOcrUploads.length})</button>
+              </div>
+              <div className="ocr-context">
+                <label>MARKET LOCATION<input required maxLength={160} placeholder="e.g. Area18" value={ocrLocation} onChange={(event) => setOcrLocation(event.target.value)} /></label>
+                <label>PATCH<input maxLength={80} value={patch} onChange={(event) => setPatch(event.target.value)} /></label>
+                <label>SERVER SHARD<input maxLength={100} value={shard} onChange={(event) => setShard(event.target.value)} /></label>
+              </div>
+              <label className="setting-toggle"><input type="checkbox" checked={autoOcrUpload} onChange={(event) => setAutoOcrUpload(event.target.checked)} /> Automatically submit scans that pass validation and confidence checks</label>
+              {autoOcrUpload && <label className="confidence-threshold">Minimum OCR confidence: {Math.round(ocrMinimumConfidence * 100)}%<input type="range" min="0.5" max="1" step="0.05" value={ocrMinimumConfidence} onChange={(event) => setOcrMinimumConfidence(Number(event.target.value))} /></label>}
+              <p className="muted">Automatic uploads remain disabled by default. Every scan is validated locally; the SC-Truckers website remains the source of truth and applies its own review process.</p>
+              <div className={`ocr-message ${ocrMessage.startsWith("Upload Successful") ? "success" : ocrMessage.startsWith("Data Validation Error") ? "validation" : ocrMessage.startsWith("Upload Failed") ? "failed" : ""}`} role="status" aria-live="polite">{ocrBusy ? "Scanning screenshot…" : ocrUploadBusy ? "Submitting scan…" : ocrMessage}</div>
+              {ocrQueueState.error && <div className="error-banner" role="alert">{ocrQueueState.error}</div>}
+            </div>
+
+            {ocrScan && (
+              <div className="panel ocr-review">
+                <div className="section-heading">
+                  <div><span className="eyebrow">OCR REVIEW · {ocrScan.layout.toUpperCase()} LAYOUT</span><h2>{ocrScan.commodities.length} extracted commodity rows</h2></div>
+                  <div className="confidence">CONFIDENCE {Math.round(ocrScan.quality.ocr_confidence * 100)}% · {ocrScan.quality.ocr_passes} PASSES</div>
+                </div>
+                {ocrScan.quality.warnings.length > 0 && <ul className="ocr-warnings">{ocrScan.quality.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+                <div className="table-wrap"><table className="ocr-table"><thead><tr><th>COMMODITY</th><th>BUY</th><th>SELL</th><th>SUPPLY</th><th>DEMAND</th></tr></thead><tbody>{ocrScan.commodities.map((row, index) => (
+                  <tr key={`${row.commodity}-${index}`}>
+                    <td><input aria-label={`Commodity ${index + 1}`} maxLength={160} value={row.commodity} onChange={(event) => updateOcrCommodity(index, "commodity", event.target.value)} /></td>
+                    {(["buy", "sell", "stock", "demand"] as const).map((field) => <td key={field}><input aria-label={`${field} for ${row.commodity}`} type="number" min="0" max="1000000000" step="1" value={row[field] ?? ""} onChange={(event) => updateOcrCommodity(index, field, event.target.value)} /></td>)}
+                  </tr>
+                ))}</tbody></table></div>
+                <button className="primary-button" disabled={ocrBusy || ocrUploadBusy} onClick={() => void sendOcrReport(makeOcrReport(ocrScan))}>Review complete · upload scan</button>
+              </div>
+            )}
+
+            <div className="panel ocr-queue">
+              <div className="section-heading"><div><span className="eyebrow">OFFLINE CACHE · RETRIES</span><h2>Upload queue</h2></div><span className="confidence">{pendingOcrUploads.length} pending</span></div>
+              {pendingOcrUploads.length === 0 ? <p className="muted">No pending uploads. Failed network submissions are cached locally for retry.</p> : (
+                <ul>{pendingOcrUploads.map((item) => <li key={item.id}>
+                  <div><strong>{item.report.location || "Location required"}</strong><small>{item.report.commodities.length} rows · {new Date(item.created_at).toLocaleString()}</small>{item.last_error && <small className="queue-error">{item.last_error}</small>}</div>
+                  <div className="queue-actions"><button className="secondary-button" disabled={ocrUploadBusy} onClick={() => void sendOcrReport(item.report, item.id)}>Retry</button><button className="danger-button" disabled={ocrUploadBusy} onClick={() => saveOcrQueue(ocrQueueRef.current.items.filter((queued) => queued.id !== item.id))}>Remove</button></div>
+                </li>)}</ul>
+              )}
+            </div>
           </section>
         )}
 

@@ -56,3 +56,48 @@ export type Ship = {
   favorite: boolean;
   notes: string;
 };
+
+export type OcrCommodity = {
+  commodity: string;
+  buy: number | null;
+  sell: number | null;
+  stock: number | null;
+  demand: number | null;
+  demand_label?: string | null;
+  layout?: string;
+};
+
+export type OcrScanResult = {
+  source: string;
+  layout: string;
+  tab: string | null;
+  commodities: OcrCommodity[];
+  inventory: { commodity: string; quantity: number; profit?: string | null }[];
+  quality: {
+    ocr_confidence: number;
+    review_recommended: boolean;
+    warnings: string[];
+    ocr_passes: number;
+  };
+  diagnostics?: { errors?: { error: string }[] };
+  requires_user_confirmation: boolean;
+};
+
+export type OcrReport = {
+  client_report_id: string;
+  location: string;
+  patch_version: string;
+  server_shard: string;
+  observed_at: string;
+  ocr_confidence: number;
+  source: "player-scan";
+  commodities: OcrCommodity[];
+  inventory: { commodity: string; quantity: number; profit_direction?: "up" | "down" }[];
+};
+
+export type PendingOcrUpload = {
+  id: string;
+  report: OcrReport;
+  created_at: string;
+  last_error: string;
+};

@@ -3,8 +3,9 @@ import sys
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -29,6 +30,24 @@ from scip_api.models import (
     User,
 )
 from scip_api.security import create_access_token
+
+
+class StubAsyncClient:
+    def __init__(self, response):
+        self.response = response
+        self.url = None
+        self.kwargs = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def post(self, url, **kwargs):
+        self.url = url
+        self.kwargs = kwargs
+        return self.response
 
 
 class ApiV2Tests(unittest.TestCase):
@@ -92,6 +111,77 @@ class ApiV2Tests(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"service": "scip-api", "desktop": "apps/desktop"})
+
+    def test_ocr_submission_requires_configured_website_endpoint(self):
+        with patch.dict(os.environ, {"SC_TRUCKERS_API_BASE_URL": ""}):
+            response = self.client.post("/api/ocr-submit", json=self.report())
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("not configured", response.json()["detail"])
+
+    def test_ocr_submission_forwards_validated_report_and_keeps_confirmation(self):
+        upstream = Mock(status_code=201)
+        upstream.json.return_value = {"id": "website-report-1", "status": "pending"}
+        client = StubAsyncClient(upstream)
+        with (
+            patch.dict(os.environ, {
+                "SC_TRUCKERS_API_BASE_URL": "https://market.example.com",
+                "SC_TRUCKERS_API_TOKEN": "test-token",
+            }),
+            patch("scip_api.main.httpx.AsyncClient", return_value=client),
+        ):
+            response = self.client.post("/api/ocr-submit", json=self.report())
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {
+            "status": "accepted",
+            "confirmation": {"id": "website-report-1", "status": "pending"},
+        })
+        self.assertEqual(client.url, "https://market.example.com/api/ocr-submit")
+        self.assertEqual(client.kwargs["headers"]["Authorization"], "Bearer test-token")
+        self.assertEqual(client.kwargs["json"]["client_report_id"], "client-report-0001")
+
+    def test_ocr_submission_rejects_insecure_remote_endpoint(self):
+        with patch.dict(os.environ, {"SC_TRUCKERS_API_BASE_URL": "http://market.example.com"}):
+            response = self.client.post("/api/ocr-submit", json=self.report())
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("HTTPS", response.json()["detail"])
+
+    def test_ocr_submission_rejects_rows_without_market_values(self):
+        invalid_report = self.report(commodities=[{"commodity": "Silicon"}])
+        response = self.client.post("/api/ocr-submit", json=invalid_report)
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("no numeric observation", response.text)
+
+    def test_ocr_routes_have_a_separate_rate_limit(self):
+        with patch.dict(os.environ, {"SC_TRUCKERS_API_BASE_URL": ""}):
+            responses = [
+                self.client.post("/api/ocr-submit", json=self.report())
+                for _ in range(11)
+            ]
+        self.assertTrue(all(response.status_code == 503 for response in responses[:10]))
+        self.assertEqual(responses[10].status_code, 429)
+
+    def test_ocr_scan_forwards_screenshot_to_local_ocr_service(self):
+        upstream = Mock(status_code=200)
+        upstream.json.return_value = {
+            "commodities": [{"commodity": "Silicon", "buy": 500}],
+            "quality": {"ocr_confidence": 0.9},
+        }
+        client = StubAsyncClient(upstream)
+        with (
+            patch.dict(os.environ, {"SCIP_OCR_SERVICE_URL": "http://127.0.0.1:8001"}),
+            patch("scip_api.main.httpx.AsyncClient", return_value=client),
+        ):
+            response = self.client.post("/api/ocr/scan", json={"image_base64": "c2Nhbg=="})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(client.url, "http://127.0.0.1:8001/ocr/scan")
+        self.assertEqual(response.json()["commodities"][0]["commodity"], "Silicon")
+
+    def test_ocr_scan_reports_unavailable_local_ocr_service(self):
+        with patch("scip_api.main.httpx.AsyncClient", side_effect=httpx.ConnectError("offline")):
+            response = self.client.post("/api/ocr/scan", json={"image_base64": "c2Nhbg=="})
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("OCR service is unavailable", response.json()["detail"])
 
     def test_discord_routes_are_not_exposed(self):
         self.assertEqual(self.client.get("/api/v2/auth/discord/start").status_code, 404)

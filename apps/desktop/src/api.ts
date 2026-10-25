@@ -1,4 +1,11 @@
-import type { HistoryPoint, MarketRow, Route, SourceStatus } from "./types";
+import type {
+  HistoryPoint,
+  MarketRow,
+  OcrReport,
+  OcrScanResult,
+  Route,
+  SourceStatus,
+} from "./types";
 
 export const API_BASE = import.meta.env.VITE_SCIP_API_URL || "http://127.0.0.1:8080";
 
@@ -22,7 +29,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       typeof body === "object" && body !== null && "detail" in body
         ? String(body.detail)
         : `API returned ${response.status}`;
-    throw new Error(detail);
+    throw new Error(detail.startsWith(`${response.status}:`)
+      ? detail
+      : `${response.status}: ${detail}`);
   }
   return body as T;
 }
@@ -67,4 +76,23 @@ export function getHistory(input: {
     days: String(input.days),
   });
   return request(`/api/v2/history?${query}`);
+}
+
+export function scanOcrImage(imageBase64: string): Promise<OcrScanResult> {
+  return request("/api/ocr/scan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image_base64: imageBase64 }),
+  });
+}
+
+export function submitOcrReport(report: OcrReport): Promise<{
+  status: "accepted";
+  confirmation: Record<string, unknown>;
+}> {
+  return request("/api/ocr-submit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(report),
+  });
 }

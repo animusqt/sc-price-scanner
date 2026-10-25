@@ -22,18 +22,27 @@ For hands-free updates, choose **Start Low-Impact Live Scan**. It checks the cal
 
 The `apps/desktop` directory contains the React + TypeScript desktop client
 packaged with Tauri 2 and configured to build a per-user Windows NSIS installer.
-It opens directly without an account. The interface includes
-Dashboard, Commodities, Routes, Fleet, Analytics, Replay, and Settings; fleet
-details and appearance preferences are stored locally. Support links appear
-inside Settings.
+It opens directly without an account. The interface includes Dashboard,
+Commodities, OCR Upload, Routes, Fleet, Analytics, Replay, and Settings; fleet
+details and appearance preferences are stored locally. The OCR uploader
+captures a screen with F9 while SCIP is focused, supports screenshot files,
+validates editable OCR results, and queues failed website submissions locally.
+Support links appear inside Settings.
 
 ### Run the desktop client
 
-Start the local API in one PowerShell window:
+Start the local API and OCR service in one PowerShell window:
 
 ```powershell
+pip install -r services\api\requirements.txt
+pip install -r services\ocr\requirements.txt
 .\scripts\start-local.ps1
 ```
+
+Install Tesseract OCR (for example, `winget install UB-Mannheim.TesseractOCR`)
+and add it to `PATH`, or set `$env:TESSERACT_CMD` to the executable path before
+starting the services. To enable website submissions, add
+`SC_TRUCKERS_API_BASE_URL` and the optional `SC_TRUCKERS_API_TOKEN` to `.env`.
 
 Install Rust with the Windows MSVC toolchain and WebView2, then run the Tauri
 desktop shell in another PowerShell window:
@@ -48,12 +57,16 @@ build with `npm run build --prefix apps\desktop`. Build the NSIS installer with
 `npm run tauri --prefix apps\desktop -- build`.
 
 The desktop shell is an implementation foundation, not yet a self-contained
-production installer: the FastAPI service must currently be started separately.
-Lovable API synchronization cannot be enabled until its endpoint, authentication
-method, and response schema are provided. Provider adapters remain disabled;
-without synchronized market records, the dashboard and route planner show
-empty-state guidance. See [apps/desktop/README.md](apps/desktop/README.md) and
-[VERSION_2.md](VERSION_2.md) for current scope and limitations.
+production installer: FastAPI and the OCR service must currently be started
+separately. OCR forwarding is implemented, but website uploads need
+`SC_TRUCKERS_API_BASE_URL` (and, if required by the website,
+`SC_TRUCKERS_API_TOKEN`) configured on the API server. The website must accept
+the documented report payload and return JSON confirmation; this has not yet
+been verified against a live Lovable endpoint. Market read synchronization
+remains disabled until its separate API contract is supplied. Without synced
+market records, the dashboard and route planner show empty-state guidance. See
+[apps/desktop/README.md](apps/desktop/README.md) and [VERSION_2.md](VERSION_2.md)
+for current scope and limitations.
 
 ### Checks
 

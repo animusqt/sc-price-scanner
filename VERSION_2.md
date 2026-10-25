@@ -10,19 +10,30 @@ FastAPI REST API for market and route reads.
 | Area | Current state |
 |---|---|
 | Desktop shell | Tauri 2 project, React + TypeScript interface, dark Mobiglas/terminal theme, and per-user NSIS installer target. |
-| Navigation | Dashboard, Commodities, Routes, Fleet, Analytics, Replay, and Settings, with Support SCIP contained in Settings. |
+| Navigation | Dashboard, Commodities, OCR Upload, Routes, Fleet, Analytics, Replay, and Settings, with Support SCIP contained in Settings. |
 | Account-free use | The desktop UI has no sign-in flow. Fleet profiles and appearance preferences are stored on the local device. |
 | Market display | Reads the existing API's patch/shard-separated market endpoint and shows price, stock, demand, observation freshness, and confidence. |
 | Route analysis | Sends anonymous route requests to the existing API and displays profit, reliability, risk, and time-efficiency rankings. |
 | Replay | Requests API history and renders buy/sell values as a basic timeline when history is available. |
+| OCR uploader | F9 screen capture while the app is focused, screenshot-file OCR, editable extracted rows, local validation, optional confidence-gated auto upload, and a browser-local retry queue. |
+| OCR submission API | Local API proxies screenshots to the OCR service and forwards validated `ReportCreate` payloads to the configured website `POST /api/ocr-submit`; failed posts remain queued on the desktop. |
 | Local service | Windows PowerShell startup script runs FastAPI with SQLite; narrow CORS origins support the Vite/Tauri desktop shell. |
 | Existing backend | SQLAlchemy/Alembic, PostgreSQL/Redis deployment configuration, market report records, route scoring, history and forecast primitives, and API tests are retained. |
 
 ## Not production-ready
 
-- **Lovable synchronization is not connected.** No API URL, authorization method,
-  endpoint contract, or sample response was supplied. Existing external source
-  adapters are deliberately disabled; no endpoint behavior has been guessed.
+- **Live Lovable connections still require configuration and verification.**
+  OCR submission forwards to `/api/ocr-submit` when
+  `SC_TRUCKERS_API_BASE_URL` is configured, with optional server-side Bearer
+  token via `SC_TRUCKERS_API_TOKEN`. The forwarded body uses the existing
+  validated `ReportCreate` schema and expects JSON confirmation, but this
+  website contract has not been verified against a live endpoint. Market read
+  synchronization still has no API URL, authorization method, or response
+  schema; external market adapters remain disabled.
+- **Local OCR requires Tesseract.** The local launcher starts the OCR service,
+  but Tesseract must be installed and available on `PATH` or set with
+  `TESSERACT_CMD`. F9 capture is available only while SCIP is focused, and the
+  webview's screen-sharing support has not been verified in a native installer.
 - **The app is not a self-contained installer yet.** Tauri's NSIS packaging is
   configured, but it does not bundle/start FastAPI. The local service currently
   must be started separately. Rust/MSVC/WebView2 are required to produce the

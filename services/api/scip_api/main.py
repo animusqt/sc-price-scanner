@@ -3,7 +3,9 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
+from urllib.parse import urlsplit
 
+import httpx
 from fastapi import (
     Depends,
     FastAPI,
@@ -47,6 +49,8 @@ from .schemas import (
     BugReportCreate,
     BugReview,
     DeviceCreate,
+    OcrImageRequest,
+    OcrSubmitRequest,
     ReportCreate,
     RouteRequest,
     TelemetryCreate,
@@ -194,6 +198,104 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
     @application.get("/")
     def service_info():
         return {"service": "scip-api", "desktop": "apps/desktop"}
+
+    @application.post("/api/ocr/scan")
+    async def scan_ocr_image(payload: OcrImageRequest):
+        ocr_service_url = os.environ.get(
+            "SCIP_OCR_SERVICE_URL", "http://127.0.0.1:8001"
+        ).rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                response = await client.post(
+                    f"{ocr_service_url}/ocr/scan",
+                    json=payload.model_dump(mode="json"),
+                )
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Local OCR service is unavailable. Start the SCIP OCR service and retry.",
+            ) from exc
+
+        if response.status_code >= 400:
+            try:
+                body = response.json()
+            except ValueError:
+                body = {}
+            detail = body.get("detail") if isinstance(body, dict) else None
+            raise HTTPException(
+                status_code=response.status_code if response.status_code < 500 else 503,
+                detail=str(detail or f"OCR processing failed ({response.status_code})."),
+            )
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=502, detail="OCR service returned an invalid response."
+            ) from exc
+
+    @application.post("/api/ocr-submit")
+    async def submit_ocr_report(payload: OcrSubmitRequest):
+        base_url = os.environ.get("SC_TRUCKERS_API_BASE_URL", "").strip().rstrip("/")
+        if not base_url:
+            raise HTTPException(
+                status_code=503,
+                detail="SC-Truckers OCR submission is not configured on this installation.",
+            )
+
+        parsed_url = urlsplit(base_url)
+        local_host = parsed_url.hostname in {"localhost", "127.0.0.1", "::1"}
+        if (
+            parsed_url.scheme != "https" and not (parsed_url.scheme == "http" and local_host)
+        ) or not parsed_url.hostname or parsed_url.username or parsed_url.password:
+            raise HTTPException(
+                status_code=503,
+                detail="SC-Truckers API must use HTTPS (HTTP is allowed only for localhost).",
+            )
+        if parsed_url.query or parsed_url.fragment:
+            raise HTTPException(
+                status_code=503, detail="SC-Truckers API base URL cannot contain a query or fragment."
+            )
+
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        api_token = os.environ.get("SC_TRUCKERS_API_TOKEN", "").strip()
+        if api_token:
+            headers["Authorization"] = f"Bearer {api_token}"
+
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.post(
+                    f"{base_url}/api/ocr-submit",
+                    json=payload.model_dump(mode="json"),
+                    headers=headers,
+                )
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="SC-Truckers could not be reached. The upload is safe to retry.",
+            ) from exc
+
+        try:
+            confirmation = response.json()
+        except ValueError:
+            confirmation = None
+        if response.status_code == 422:
+            detail = (
+                confirmation.get("detail")
+                if isinstance(confirmation, dict)
+                else "SC-Truckers rejected the OCR data."
+            )
+            raise HTTPException(status_code=422, detail=str(detail))
+        if response.status_code >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail=f"SC-Truckers upload failed with HTTP {response.status_code}.",
+            )
+        if confirmation is None:
+            raise HTTPException(
+                status_code=502,
+                detail="SC-Truckers accepted no readable confirmation; retry with the same report ID.",
+            )
+        return {"status": "accepted", "confirmation": confirmation}
 
     @application.get("/health/ready")
     def readiness(session: Session = Depends(get_session)):

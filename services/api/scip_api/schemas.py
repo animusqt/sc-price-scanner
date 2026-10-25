@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class StrictSchema(BaseModel):
@@ -73,6 +73,21 @@ class ReportCreate(StrictSchema):
         if not value:
             raise ValueError("context fields cannot be blank")
         return value
+
+
+class OcrSubmitRequest(ReportCreate):
+    source: Literal["player-scan"] = "player-scan"
+
+    @model_validator(mode="after")
+    def require_numeric_market_data(self):
+        for row in self.commodities:
+            if all(getattr(row, field) is None for field in ("buy", "sell", "stock", "demand")):
+                raise ValueError(f"{row.commodity} has no numeric observation.")
+        return self
+
+
+class OcrImageRequest(StrictSchema):
+    image_base64: str = Field(min_length=1, max_length=28_000_000)
 
 
 class TelemetryCreate(StrictSchema):

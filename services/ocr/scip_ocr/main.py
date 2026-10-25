@@ -1,5 +1,6 @@
 import base64
 import binascii
+import os
 from io import BytesIO
 
 import cv2
@@ -11,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field
 import sc_parser
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
+if os.environ.get("TESSERACT_CMD") and sc_parser.pytesseract is not None:
+    sc_parser.pytesseract.pytesseract.tesseract_cmd = os.environ["TESSERACT_CMD"]
 
 
 class ScanRequest(BaseModel):
@@ -60,6 +63,12 @@ def scan_image(request: ScanRequest):
         _, parsed, tag = sc_parser.run_ocr(image)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"OCR processing failed: {type(exc).__name__}.") from exc
+    diagnostics = parsed.get("diagnostics", {})
+    if not diagnostics.get("passes") and diagnostics.get("errors"):
+        raise HTTPException(
+            status_code=503,
+            detail="OCR could not run successfully. Check that Tesseract OCR is installed and configured.",
+        )
 
     return {
         "schema_version": "2.0",
@@ -70,7 +79,7 @@ def scan_image(request: ScanRequest):
         "commodities": parsed.get("rows", []),
         "inventory": parsed.get("inventory", []),
         "quality": sc_parser.quality_report(parsed),
-        "diagnostics": parsed.get("diagnostics", {}),
+        "diagnostics": diagnostics,
         "requires_user_confirmation": True,
         "automatically_uploaded": False,
     }
