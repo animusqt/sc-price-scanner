@@ -834,12 +834,37 @@ def quality_report(parsed):
         warnings.append("One or more values lacked agreement across OCR passes.")
     if diagnostics.get("errors"):
         warnings.append("One or more OCR passes failed; see the debug report.")
+    mean_ocr = diagnostics.get("mean_ocr_confidence")
+    if mean_ocr is None:
+        ocr_component = 0.5
+    else:
+        ocr_component = max(0.0, min(1.0, float(mean_ocr) / 100.0))
+    passes = len(diagnostics.get("passes", []))
+    pass_component = min(1.0, passes / 4.0)
+    tab_component = (
+        1.0 if parsed.get("layout") != "modal" or diagnostics.get("active_tab") else 0.5
+    )
+    disputed = sum(
+        len(fields)
+        for fields in diagnostics.get("field_votes", {}).values()
+        if isinstance(fields, dict)
+    )
+    row_count = max(1, diagnostics.get("row_count", 0))
+    agreement_component = max(0.0, 1.0 - min(1.0, disputed / (row_count * 4)))
+    confidence = (
+        0.55 * ocr_component
+        + 0.20 * pass_component
+        + 0.15 * tab_component
+        + 0.10 * agreement_component
+    )
     return {
         "review_recommended": bool(warnings),
         "warnings": warnings,
-        "ocr_passes": len(diagnostics.get("passes", [])),
+        "ocr_passes": passes,
         "active_tab": diagnostics.get("active_tab"),
         "tab_votes": diagnostics.get("tab_votes", {}),
+        "ocr_confidence": round(max(0.0, min(1.0, confidence)), 4),
+        "confidence_method": "parser-quality-v1",
     }
 
 
@@ -1054,6 +1079,18 @@ def run_ocr(img):
     diagnostics["coordinate_scale"] = {"x": scale_x, "y": scale_y}
     diagnostics["crop_left"] = crop_left
     diagnostics["row_count"] = len(rows)
+    if best_data is not None:
+        confidences = []
+        for value in best_data.get("conf", []):
+            try:
+                confidence = float(value)
+            except (TypeError, ValueError):
+                continue
+            if confidence >= 0:
+                confidences.append(confidence)
+        diagnostics["mean_ocr_confidence"] = (
+            sum(confidences) / len(confidences) if confidences else None
+        )
     if has_modal and active_tab is None:
         diagnostics["errors"].append({
             "error": "The active Buy/Local Market Value tab could not be confirmed."

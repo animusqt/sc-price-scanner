@@ -16,6 +16,8 @@ scanner-engine/__pycache__/
 node_modules/
 electron-overlay/node_modules/
 electron-overlay/dist/
+apps/launcher/node_modules/
+apps/launcher/dist/
 
 # OS
 .DS_Store
@@ -24,3 +26,8 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.env
+*.db
+backups/
+logs/
+*.dump

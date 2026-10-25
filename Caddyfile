@@ -1,0 +1,7 @@
+{$SITE_DOMAIN} {
+    tls {
+        protocols tls1.3
+    }
+    encode zstd gzip
+    reverse_proxy web:80
+}

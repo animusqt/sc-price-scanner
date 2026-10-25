@@ -1,0 +1,1 @@
+"""SCIP OCR service."""

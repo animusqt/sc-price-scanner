@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>SCIP Market Intelligence</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">STAR CITIZEN INTELLIGENCE PLATFORM</p>
+        <h1>Commodity Market</h1>
+        <p class="muted">Community-submitted reports, separated by patch and server shard.</p>
+      </div>
+      <a class="button" id="login" href="/api/v2/auth/discord/start">Sign in with Discord</a>
+    </header>
+    <main>
+      <section class="filters">
+        <label>Patch <input id="patch" value="live" maxlength="80"></label>
+        <label>Shard <input id="shard" value="global" maxlength="100"></label>
+        <button id="refresh">Load market</button>
+      </section>
+      <p id="status" role="status">Connect an API service to load market reports.</p>
+      <section id="markets" aria-live="polite"></section>
+      <section class="import-panel">
+        <h2>Submit a player scan</h2>
+        <p class="muted">Choose a local scanner JSON file, review the preview, then explicitly confirm submission. Screenshots are not uploaded. New reports remain pending until a moderator confirms them.</p>
+        <label>Scanner JSON <input id="scan-file" type="file" accept=".json,application/json"></label>
+        <div class="filters">
+          <label>Current game patch <input id="report-patch" maxlength="80" placeholder="Example: 4.0"></label>
+          <label>Server shard <input id="report-shard" maxlength="100" placeholder="Example: LIVE"></label>
+          <label>OCR confidence <input id="report-confidence" type="number" min="0" max="1" step="0.01" value="0.5"></label>
+        </div>
+        <div id="scan-preview" role="status">No scan selected.</div>
+        <label class="confirm"><input id="confirm-report" type="checkbox"> I reviewed this report and confirm the patch and shard are correct. I understand it will be submitted as unconfirmed player data.</label>
+        <button id="submit-report" disabled>Submit reviewed scan</button>
+        <p id="upload-status" role="status"></p>
+      </section>
+      <aside>
+        <strong>Data trust</strong>
+        <p>Player scans are reports, not verified facts. Values show source context, freshness, and confidence. Always confirm critical trade details in-game.</p>
+      </aside>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

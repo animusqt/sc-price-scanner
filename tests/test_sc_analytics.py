@@ -222,6 +222,33 @@ class InventoryTrendTests(unittest.TestCase):
                 now=NOW,
             )
 
+    def test_linear_forecast_projects_trend_and_reports_uncertainty(self):
+        observations = [
+            {"value": 100, "observed_at": NOW - 2 * 3600, "confidence": 0.9},
+            {"value": 120, "observed_at": NOW - 3600, "confidence": 0.8},
+            {"value": 140, "observed_at": NOW, "confidence": 0.9},
+        ]
+        forecast = sc_analytics.linear_forecast(
+            observations,
+            horizon_hours=2,
+            now=NOW,
+        )
+        self.assertEqual(forecast["predicted_value"], 180)
+        self.assertEqual(forecast["slope_per_hour"], 20)
+        self.assertGreater(forecast["confidence"], 0)
+        self.assertLessEqual(forecast["confidence"], 1)
+
+    def test_linear_forecast_rejects_insufficient_or_stale_history(self):
+        self.assertIsNone(sc_analytics.linear_forecast([
+            {"value": 100, "observed_at": NOW - 3600},
+            {"value": 90, "observed_at": NOW},
+        ], now=NOW))
+        self.assertIsNone(sc_analytics.linear_forecast([
+            {"value": 100, "observed_at": NOW - 5 * 3600},
+            {"value": 90, "observed_at": NOW - 4 * 3600},
+            {"value": 80, "observed_at": NOW - 3 * 3600},
+        ], now=NOW, max_age_hours=2))
+
 
 if __name__ == "__main__":
     unittest.main()

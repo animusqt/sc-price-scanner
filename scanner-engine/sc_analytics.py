@@ -337,3 +337,63 @@ def estimate_stock_depletion(
         "observed_at": latest_time,
         "snapshot_count": len(valid),
     }
+
+
+def linear_forecast(
+    observations: Iterable[dict[str, Any]],
+    *,
+    horizon_hours: float = 24.0,
+    now: Any = None,
+    max_age_hours: float = 72.0,
+) -> dict[str, Any] | None:
+    """Project a metric with a transparent linear baseline and bounded confidence."""
+    horizon = _bounded_number(horizon_hours, "horizon_hours", 0.01, 24.0 * 30.0)
+    max_age = _bounded_number(max_age_hours, "max_age_hours", 0.01, 24.0 * 365.0)
+    points = [
+        (
+            _timestamp(item.get("observed_at")),
+            _bounded_number(item.get("value"), "value", 0.0, 1e12),
+            _bounded_number(item.get("confidence", 1.0), "confidence", 0.0, 1.0),
+        )
+        for item in observations
+    ]
+    if len(points) < 3:
+        return None
+    points.sort(key=lambda point: point[0])
+    current_time = _timestamp(now) if now is not None else datetime.now(timezone.utc).timestamp()
+    oldest, latest = points[0][0], points[-1][0]
+    age_hours = max(0.0, (current_time - latest) / 3600.0)
+    span_hours = (latest - oldest) / 3600.0
+    if span_hours <= 0 or age_hours > max_age:
+        return None
+
+    origin = points[0][0]
+    xs = [(timestamp - origin) / 3600.0 for timestamp, _, _ in points]
+    ys = [value for _, value, _ in points]
+    x_mean = sum(xs) / len(xs)
+    y_mean = sum(ys) / len(ys)
+    variance = sum((x - x_mean) ** 2 for x in xs)
+    if variance <= 0:
+        return None
+    slope = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys)) / variance
+    intercept = y_mean - slope * x_mean
+    prediction = max(0.0, intercept + slope * (xs[-1] + horizon))
+    residual_sum = sum(
+        (y - (intercept + slope * x)) ** 2 for x, y in zip(xs, ys)
+    )
+    rmse = math.sqrt(residual_sum / len(points))
+    normalized_error = rmse / max(abs(y_mean), 1.0)
+    sample_support = min(1.0, len(points) / 8.0)
+    freshness = math.exp(-math.log(2) * age_hours / 24.0)
+    source_quality = sum(point[2] for point in points) / len(points)
+    confidence = source_quality * sample_support * freshness / (1.0 + normalized_error)
+    return {
+        "predicted_value": prediction,
+        "slope_per_hour": slope,
+        "confidence": max(0.0, min(1.0, confidence)),
+        "rmse": rmse,
+        "sample_count": len(points),
+        "span_hours": span_hours,
+        "horizon_hours": horizon,
+        "latest_observed_at": latest,
+    }

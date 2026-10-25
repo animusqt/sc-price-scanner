@@ -14,6 +14,47 @@ For hands-free updates, choose **Start Low-Impact Live Scan**. It checks the cal
 
 ---
 
+## Version 2 platform
+
+The `version-2` branch adds a FastAPI market API, PostgreSQL/Redis services,
+OCR service, and a responsive dashboard. It accepts manually reviewed player
+scan JSON, keeps reports pending moderation, separates patch/shard data, and
+only uses moderator-confirmed reports for route recommendations. See
+[VERSION_2.md](VERSION_2.md) for implemented areas and limitations.
+
+### Run locally
+
+1. Install Docker Compose and copy `.env.example` to `.env`.
+2. Set strong, unique URL-safe values for the database and Redis passwords,
+   plus a random `JWT_SECRET` with at least 32 bytes.
+3. For Discord sign-in and report submission, configure the Discord client,
+   bot, guild, and optional verified role. Set the local callback URL to
+   `http://localhost:8080/api/v2/auth/discord/callback`.
+4. Run `docker compose up --build` and open `http://localhost:8080`.
+
+The dashboard can start without Discord credentials, but authenticated
+submission is unavailable until Discord is configured. For public deployment,
+set production secrets and `SITE_DOMAIN`, configure the public HTTPS callback
+and web URL, then start with `docker compose --profile production up --build`.
+The `gateway` profile provides Caddy TLS; do not expose the development profile
+directly to the internet.
+
+The API, OAuth integration, authorized external market providers, moderation
+staff, and production environment must be operated/configured by the deployment
+owner. Provider adapters remain disabled until their API contracts are
+approved. WebSocket fan-out currently expects one API instance. Supporter
+payment processing and an independent Discord bot are not included.
+
+### Version 2 checks
+
+```powershell
+python -m unittest discover -s tests -v
+npm ci --prefix apps/launcher
+npm run build --prefix apps/launcher -- --dir --config.win.signAndEditExecutable=false
+```
+
+---
+
 ## Build the scanner
 
 ### Prerequisites
@@ -117,7 +158,12 @@ SCAN_DIR = Path.home() / "OneDrive" / "Documents" / "SC-Truckers Scans"
 ```
 sc_price_scanner/
 ├── Launch Overlay.bat  # One-click launcher
-├── electron-overlay/   # Desktop overlay application
+├── apps/
+│   ├── launcher/       # Version 2 Electron launcher source
+│   ├── web/            # Market dashboard
+│   └── ...
+├── electron-overlay/   # Legacy overlay source; retained for compatibility
+├── services/           # Version 2 API, OCR and web deployment services
 ├── scanner-engine/     # Python scanner, bridge, and build files
 └── README.md
 ```

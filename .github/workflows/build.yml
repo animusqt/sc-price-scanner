@@ -129,24 +129,24 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cd electron-overlay
+          cd apps/launcher
           npm ci
 
       - name: Build overlay
         run: |
-          cd electron-overlay
+          cd apps/launcher
           npm run build
 
       - name: Verify build
         run: |
-          ls -la electron-overlay/dist/
-          file electron-overlay/dist/* 2>/dev/null || true
+          ls -la apps/launcher/dist/
+          file apps/launcher/dist/* 2>/dev/null || true
 
       - name: Upload overlay artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: electron-overlay/dist/**
+          path: apps/launcher/dist/**
           retention-days: 30
 
   # ============================================================

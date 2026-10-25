@@ -1,0 +1,487 @@
+// Renderer process for SC Price Scanner Overlay
+
+const api = window.scannerAPI;
+
+let clickThrough = false;
+let lastScanData = null;
+
+// DOM elements
+const elements = {
+  scannerStatus: document.getElementById('scannerStatus'),
+  lastScan: document.getElementById('lastScan'),
+  commodityCount: document.getElementById('commodityCount'),
+  scanBtn: document.getElementById('scanBtn'),
+  calibrateBtn: document.getElementById('calibrateBtn'),
+  liveScanBtn: document.getElementById('liveScanBtn'),
+  clickThroughBtn: document.getElementById('clickThroughBtn'),
+  minimizeBtn: document.getElementById('minimizeBtn'),
+  closeBtn: document.getElementById('closeBtn'),
+  previewCard: document.getElementById('previewCard'),
+  previewTable: document.getElementById('previewTable'),
+  previewCargo: document.getElementById('previewCargo'),
+  openScanFolder: document.getElementById('openScanFolder'),
+  openDebugFolder: document.getElementById('openDebugFolder'),
+  uploadToSite: document.getElementById('uploadToSite'),
+  logConsole: document.getElementById('logConsole'),
+  titleBar: document.getElementById('titleBar'),
+  resizeHandle: document.getElementById('resizeHandle'),
+  settingsBtn: document.getElementById('settingsBtn'),
+  settingsPanel: document.getElementById('settingsPanel'),
+  closeSettings: document.getElementById('closeSettings'),
+  settingsDone: document.getElementById('settingsDone'),
+  settingsOpenFolder: document.getElementById('settingsOpenFolder'),
+  lockWindow: document.getElementById('lockWindow'),
+  minToTray: document.getElementById('minToTray'),
+  stationInput: document.getElementById('stationInput'),
+  themeChips: Array.from(document.querySelectorAll('[data-theme-choice]'))
+};
+
+// Initialize
+document.addEventListener('DOMContentLoaded', init);
+
+function init() {
+  initSettings();
+  setupEventListeners();
+  setupScannerListeners();
+  log('info', 'Overlay initialized');
+  log('info', `Platform: ${navigator.platform}`);
+  checkScannerConnection();
+  if (api.rendererReady) api.rendererReady();
+  requestAnimationFrame(scheduleFit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit);
+}
+
+/* ------------------------------------------------------------------
+   Settings
+   ------------------------------------------------------------------ */
+const SETTINGS_KEY = 'scanner.settings';
+const DEFAULT_SETTINGS = {
+  theme: null,
+  locked: false,
+  minToTray: true,
+  station: '',
+  panels: { preview: false, actions: false, log: false }
+};
+let settings = { ...DEFAULT_SETTINGS, theme: null };
+let collapsed = false;
+
+function normalizeTheme(theme) {
+  if (theme === 'light' || theme === 'morning') return 'light';
+  return 'dark';
+}
+
+function detectTheme() {
+  const h = new Date().getHours();
+  return (h >= 6 && h < 18) ? 'light' : 'dark';
+}
+
+function initSettings() {
+  try {
+    settings = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
+  } catch {
+    settings = { ...DEFAULT_SETTINGS, theme: null };
+  }
+  settings.panels = { ...DEFAULT_SETTINGS.panels, ...(settings.panels || {}) };
+  if (!settings.theme) settings.theme = detectTheme();
+
+  elements.lockWindow.checked = !!settings.locked;
+  elements.minToTray.checked = settings.minToTray !== false;
+  elements.stationInput.value = settings.station || '';
+
+  applyTheme(settings.theme);
+  applyPanels();
+  applyLock(!!settings.locked);
+  if (api.setCloseToTray) api.setCloseToTray(elements.minToTray.checked);
+  if (api.setStation) api.setStation(settings.station || '');
+}
+
+function saveSettings() {
+  settings.theme = document.documentElement.dataset.theme || settings.theme;
+  settings.locked = elements.lockWindow.checked;
+  settings.minToTray = elements.minToTray.checked;
+  settings.station = elements.stationInput.value.trim();
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {}
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = normalizeTheme(theme);
+  elements.themeChips.forEach((chip) => {
+    chip.classList.toggle('active', chip.dataset.themeChoice === document.documentElement.dataset.theme);
+  });
+}
+
+function applyPanels() {
+  document.querySelectorAll('.card-toggle').forEach((btn) => {
+    const card = btn.closest('.card');
+    const isCollapsed = !!settings.panels[btn.dataset.panel];
+    card.classList.toggle('panel-collapsed', isCollapsed);
+    btn.title = isCollapsed ? 'Expand panel' : 'Collapse panel';
+  });
+}
+
+function applyLock(locked) {
+  document.body.classList.toggle('locked', locked);
+  if (api.setLocked) api.setLocked(locked);
+}
+
+function toggleCollapse(force) {
+  collapsed = typeof force === 'boolean' ? force : !collapsed;
+  document.body.classList.toggle('collapsed', collapsed);
+  elements.minimizeBtn.title = collapsed ? 'Expand' : 'Collapse';
+  if (api.setCollapsed) api.setCollapsed(collapsed);
+  if (collapsed) {
+    elements.settingsPanel.hidden = true;
+  } else {
+    scheduleFit();
+  }
+}
+
+let fitTimer = null;
+
+function scheduleFit() {
+  clearTimeout(fitTimer);
+  fitTimer = setTimeout(fitWindow, 60);
+}
+
+function fitWindow() {
+  if (collapsed || !api.fitHeight) return;
+  const app = document.getElementById('app');
+  const height = Math.ceil(app.getBoundingClientRect().height);
+  if (height > 0) api.fitHeight(height);
+}
+
+function openSettings() {
+  if (collapsed) toggleCollapse(false);
+  elements.settingsPanel.hidden = false;
+}
+
+function closeSettingsPanel() {
+  elements.settingsPanel.hidden = true;
+}
+
+function setupEventListeners() {
+  // Window controls
+  elements.minimizeBtn.addEventListener('click', () => toggleCollapse());
+  elements.closeBtn.addEventListener('click', () => api.closeOverlay());
+
+  // Settings
+  elements.settingsBtn.addEventListener('click', openSettings);
+  elements.closeSettings.addEventListener('click', closeSettingsPanel);
+  elements.settingsDone.addEventListener('click', closeSettingsPanel);
+  elements.settingsOpenFolder.addEventListener('click', openScanFolder);
+  elements.themeChips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      applyTheme(chip.dataset.themeChoice);
+      saveSettings();
+    });
+  });
+  elements.lockWindow.addEventListener('change', () => {
+    applyLock(elements.lockWindow.checked);
+    saveSettings();
+  });
+  elements.minToTray.addEventListener('change', () => {
+    if (api.setCloseToTray) api.setCloseToTray(elements.minToTray.checked);
+    saveSettings();
+  });
+  elements.stationInput.addEventListener('change', () => {
+    settings.station = elements.stationInput.value.trim();
+    if (api.setStation) api.setStation(settings.station);
+    saveSettings();
+  });
+
+  // Panel collapse
+  document.querySelectorAll('.card-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const card = btn.closest('.card');
+      const isCollapsed = card.classList.toggle('panel-collapsed');
+      settings.panels[btn.dataset.panel] = isCollapsed;
+      btn.title = isCollapsed ? 'Expand panel' : 'Collapse panel';
+      saveSettings();
+      scheduleFit();
+    });
+  });
+
+  // Actions
+  elements.scanBtn.addEventListener('click', () => {
+    api.triggerScan();
+    setStatus('scanning', 'Scanning…');
+  });
+
+  elements.calibrateBtn.addEventListener('click', () => {
+    api.triggerCalibrate();
+    log('info', 'Calibration mode triggered (F8)');
+  });
+  elements.liveScanBtn.addEventListener('click', () => {
+    api.triggerLiveScan();
+    elements.liveScanBtn.disabled = true;
+    setTimeout(() => {
+      elements.liveScanBtn.disabled = false;
+    }, 2000);
+  });
+
+  // Click-through toggle
+  elements.clickThroughBtn.addEventListener('click', toggleClickThrough);
+
+  // Preview actions
+  elements.openScanFolder.addEventListener('click', openScanFolder);
+  elements.openDebugFolder.addEventListener('click', () => api.openDebugFolder());
+  elements.uploadToSite.addEventListener('click', uploadToSite);
+
+  // Drag handling for title bar (when not click-through)
+  let isDragging = false;
+  let dragOffset = { x: 0, y: 0 };
+
+  elements.titleBar.addEventListener('mousedown', (e) => {
+    if (clickThrough || e.target.closest('.icon-btn')) return;
+    isDragging = true;
+    dragOffset.x = e.clientX;
+    dragOffset.y = e.clientY;
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    // Handled by -webkit-app-region: drag in CSS
+  });
+
+  document.addEventListener('mouseup', () => { isDragging = false; });
+
+  // Keyboard shortcuts (global via scanner, but also local)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F9') api.triggerScan();
+    if (e.key === 'F8') api.triggerCalibrate();
+    if (e.key === 'Escape') {
+      if (!elements.settingsPanel.hidden) {
+        closeSettingsPanel();
+      } else {
+        toggleCollapse();
+      }
+    }
+  });
+
+  // Resize handling
+  setupResize();
+}
+
+function setupScannerListeners() {
+  api.onScannerOutput(handleScannerOutput);
+  api.onScannerLog(handleScannerLog);
+  api.onScannerExit(handleScannerExit);
+}
+
+function handleScannerOutput(data) {
+  if (data.type === 'live_scan_status') {
+    const enabled = !!data.enabled;
+    elements.liveScanBtn.disabled = false;
+    elements.liveScanBtn.setAttribute('aria-pressed', String(enabled));
+    elements.liveScanBtn.querySelector('span').textContent = enabled
+      ? 'Stop Low-Impact Live Scan'
+      : 'Start Low-Impact Live Scan';
+    elements.liveScanBtn.classList.toggle('btn-primary', enabled);
+    elements.liveScanBtn.classList.toggle('btn-ghost', !enabled);
+  } else if (data.type === 'scan_complete') {
+    if (collapsed) toggleCollapse(false);
+    lastScanData = data.payload;
+    updateScanPreview(data.payload);
+    setStatus('connected', 'Connected');
+    log('success', `Scan complete: ${data.payload.commodities.length} commodities from ${data.payload.station}`);
+    if (data.payload.quality && data.payload.quality.review_recommended) {
+      data.payload.quality.warnings.forEach((warning) => log('warn', warning));
+    }
+  } else if (data.type === 'calibration_complete') {
+    log('success', `Calibration saved: ${JSON.stringify(data.payload)}`);
+  } else if (data.type === 'status') {
+    log('info', data.message);
+    if (/bridge ready|^region /i.test(data.message)) setStatus('connected', 'Connected');
+  }
+}
+
+function handleScannerLog(line) {
+  const lower = line.toLowerCase();
+  let type = 'info';
+  if (lower.includes('error') || lower.includes('failed')) type = 'error';
+  else if (lower.includes('warn')) type = 'warn';
+  else if (lower.includes('saved') || lower.includes('complete') || lower.includes('✅')) type = 'success';
+  else if (lower.includes('scanning') || lower.includes('capturing')) type = 'info';
+  log(type, line);
+}
+
+function handleScannerExit(code) {
+  setStatus('disconnected', 'Scanner stopped');
+  log('error', `Scanner process exited with code ${code}`);
+  // Could auto-restart here
+}
+
+function checkScannerConnection() {
+  setStatus('connecting', 'Starting scanner…');
+  // Connection status will update via scanner logs
+}
+
+function setStatus(state, label) {
+  const dot = elements.scannerStatus.querySelector('.dot');
+  const labelEl = elements.scannerStatus.querySelector('.label');
+
+  dot.className = 'dot ' + state;
+  labelEl.textContent = label;
+}
+
+function updateScanPreview(scan) {
+  elements.lastScan.textContent = formatTimeAgo(scan.timestamp);
+  elements.commodityCount.textContent = scan.commodities.length;
+  if (!elements.stationInput.value) {
+    elements.stationInput.placeholder = 'Auto: ' + scan.station;
+  }
+
+  // Build table
+  const validRows = scan.commodities
+    .filter(c => c.sell != null || c.buy != null)
+    .sort((a, b) => String(a.commodity).localeCompare(String(b.commodity)))
+    .slice(0, 15);
+
+  if (validRows.length === 0) {
+    elements.previewTable.innerHTML = '<p class="hint">No valid buy/sell data in scan</p>';
+  } else {
+    elements.previewTable.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Commodity</th>
+            <th class="right">Buy</th>
+            <th class="right">Sell</th>
+            <th class="right">Stock</th>
+            <th class="right">Demand</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${validRows.map(c => `
+            <tr>
+              <td>${escapeHtml(c.commodity)}</td>
+              <td class="right positive">${formatNumber(c.buy)}</td>
+              <td class="right negative">${formatNumber(c.sell)}</td>
+              <td class="right">${formatNumber(c.stock)}</td>
+              <td class="right">${escapeHtml(c.demand_label || formatNumber(c.demand))}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  const cargo = Array.isArray(scan.inventory) ? scan.inventory : [];
+  if (elements.previewCargo) {
+    elements.previewCargo.innerHTML = cargo.length === 0 ? '' : `
+      <div class="cargo-title">Ship cargo</div>
+      <ul class="cargo-list">
+        ${cargo.map(item => {
+          const arrow = item.profit === 'up' ? '\u2191' : item.profit === 'down' ? '\u2193' : '';
+          return `<li>
+            <span class="cargo-name">${escapeHtml(item.commodity)}</span>
+            <span class="cargo-qty">${formatNumber(item.quantity)} SCU</span>
+            <span class="cargo-arrow ${item.profit === 'up' ? 'up' : item.profit === 'down' ? 'down' : ''}">${arrow}</span>
+          </li>`;
+        }).join('')}
+      </ul>
+    `;
+  }
+
+  elements.previewCard.style.display = 'block';
+  scheduleFit();
+}
+
+function log(type, message) {
+  const time = new Date().toLocaleTimeString();
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `
+    <span class="log-time">${time}</span>
+    <span class="log-message ${type}">${escapeHtml(message)}</span>
+  `;
+  elements.logConsole.appendChild(entry);
+  elements.logConsole.scrollTop = elements.logConsole.scrollHeight;
+
+  // Limit log entries
+  while (elements.logConsole.children.length > 100) {
+    elements.logConsole.removeChild(elements.logConsole.firstChild);
+  }
+}
+
+function toggleClickThrough() {
+  clickThrough = !clickThrough;
+  api.setClickThrough(clickThrough);
+  elements.clickThroughBtn.classList.toggle('active', clickThrough);
+  elements.clickThroughBtn.title = clickThrough
+    ? 'Click-through ON (hold Shift + drag title bar to move)'
+    : 'Click-through OFF';
+  log('info', `Click-through ${clickThrough ? 'enabled' : 'disabled'}`);
+}
+
+function openScanFolder() {
+  api.openScansFolder();
+  api.getScansFolder().then((dir) => log('info', `Scans folder: ${dir}`));
+}
+
+function uploadToSite() {
+  if (!lastScanData) {
+    log('warn', 'Scan something first (F9), then upload');
+    return;
+  }
+  api.openSite();
+  log('info', 'Opened SC-Truckers market - drag the JSON from the scans folder into Import Scan');
+}
+
+function setupResize() {
+  let isResizing = false;
+  let startWidth, startHeight, startX, startY;
+
+  elements.resizeHandle.addEventListener('mousedown', async (e) => {
+    if (clickThrough || collapsed || document.body.classList.contains('locked')) return;
+    isResizing = true;
+    startX = e.screenX;
+    startY = e.screenY;
+    try {
+      const b = await api.getBounds();
+      startWidth = b ? b.width : window.innerWidth;
+      startHeight = b ? b.height : window.innerHeight;
+    } catch {
+      startWidth = window.innerWidth;
+      startHeight = window.innerHeight;
+    }
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const width = Math.max(260, startWidth + (e.screenX - startX));
+    const height = Math.max(300, startHeight + (e.screenY - startY));
+    if (api.resizeWindow) api.resizeWindow(width, height);
+  });
+
+  window.addEventListener('mouseup', () => { isResizing = false; });
+}
+
+// Helpers
+function formatTimeAgo(timestamp) {
+  const secs = Math.floor(Date.now() / 1000 - timestamp);
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  return `${Math.floor(secs / 3600)}h ago`;
+}
+
+function formatNumber(n) {
+  if (n == null) return '—';
+  return n.toLocaleString();
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Cleanup on unload
+window.addEventListener('beforeunload', () => {
+  api.removeAllListeners('scanner-output');
+  api.removeAllListeners('scanner-log');
+  api.removeAllListeners('scanner-exit');
+});
