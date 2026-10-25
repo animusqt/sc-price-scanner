@@ -33,8 +33,12 @@ primitives with deterministic tests.
 - Provider adapters are deliberately disabled. No UEX, Erkul, Hauler, SC
   Trade Tools, or other live source is queried until its authorized API
   contract and field mapping are configured.
-- The supporter profile is data/API scaffolding only; payments, badge
-  synchronization, and a Discord bot are not implemented.
+- Discord interactions support `/ping`, confirmed `/market` lookup,
+  `/bug-report`, and moderator-only `/review-bug`. The interactions endpoint
+  and command registration script need a publicly reachable HTTPS API,
+  configured public key, bot token, and guild/application setup.
+- The supporter profile is data/API scaffolding only; payments and badge
+  synchronization are not implemented.
 - Forecasting is an explainable linear baseline, not a validated economic
   predictor. Historical reports remain player observations and should not be
   treated as guaranteed in-game truth.

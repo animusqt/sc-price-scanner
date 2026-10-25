@@ -231,6 +231,13 @@ class WebSocketTicket(Base):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class DiscordInteraction(Base):
+    __tablename__ = "discord_interactions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 class TelemetryEvent(Base):
     __tablename__ = "telemetry_events"
 

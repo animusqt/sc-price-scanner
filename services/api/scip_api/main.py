@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from fastapi import (
     FastAPI,
     HTTPException,
     Query,
+    Request,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -21,12 +23,19 @@ from sqlalchemy.orm import Session, joinedload
 import sc_analytics
 from .auth import current_user, router as auth_router
 from .database import Base, engine, get_session
+from .discord_interactions import (
+    MAX_INTERACTION_BODY,
+    handle_interaction,
+    parse_interaction_body,
+    verify_discord_signature,
+)
 from .limiter import RateLimitMiddleware
 from .models import (
     AuditEvent,
     BugReport,
     Commodity,
     ConfidenceScore,
+    DiscordInteraction,
     Device,
     ForecastRecord,
     InventorySnapshot,
@@ -186,6 +195,56 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
     def readiness(session: Session = Depends(get_session)):
         session.execute(select(1))
         return {"status": "ready", "database": "ok"}
+
+    @application.post("/api/v2/discord/interactions")
+    async def discord_interactions(
+        request: Request,
+        session: Session = Depends(get_session),
+    ):
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdecimal() and int(content_length) > MAX_INTERACTION_BODY:
+            raise HTTPException(status_code=413, detail="Discord interaction payload is too large.")
+        body = await request.body()
+        if len(body) > MAX_INTERACTION_BODY:
+            raise HTTPException(status_code=413, detail="Discord interaction payload is too large.")
+        if not verify_discord_signature(
+            body,
+            request.headers.get("X-Signature-Ed25519"),
+            request.headers.get("X-Signature-Timestamp"),
+        ):
+            raise HTTPException(status_code=401, detail="Invalid Discord request signature.")
+        try:
+            payload = parse_interaction_body(body)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid Discord interaction payload.") from exc
+        interaction_id = payload.get("id")
+        if not isinstance(interaction_id, str) or not interaction_id.isdecimal():
+            raise HTTPException(status_code=400, detail="Discord interaction ID is invalid.")
+        if session.get(DiscordInteraction, interaction_id) is not None:
+            return {
+                "type": 4,
+                "data": {
+                    "content": "This interaction was already handled.",
+                    "flags": 64,
+                    "allowed_mentions": {"parse": []},
+                },
+            }
+        session.add(DiscordInteraction(id=interaction_id))
+        try:
+            session.flush()
+        except IntegrityError:
+            session.rollback()
+            return {
+                "type": 4,
+                "data": {
+                    "content": "This interaction was already handled.",
+                    "flags": 64,
+                    "allowed_mentions": {"parse": []},
+                },
+            }
+        result = handle_interaction(payload, session)
+        session.commit()
+        return result
 
     @application.post("/api/v2/devices", status_code=201)
     def register_device(

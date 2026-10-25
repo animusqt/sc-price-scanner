@@ -28,7 +28,7 @@ only uses moderator-confirmed reports for route recommendations. See
 2. Set strong, unique URL-safe values for the database and Redis passwords,
    plus a random `JWT_SECRET` with at least 32 bytes.
 3. For Discord sign-in and report submission, configure the Discord client,
-   bot, guild, and optional verified role. Set the local callback URL to
+   public key, bot, guild, and optional verified role. Set the local callback URL to
    `http://localhost:8080/api/v2/auth/discord/callback`.
 4. Run `docker compose up --build` and open `http://localhost:8080`.
 
@@ -39,11 +39,25 @@ and web URL, then start with `docker compose --profile production up --build`.
 The `gateway` profile provides Caddy TLS; do not expose the development profile
 directly to the internet.
 
+### Discord bot commands
+
+The API also supports Discord's signed interactions endpoint. Create a bot
+token in the Developer Portal and place it in the ignored `.env` as
+`DISCORD_BOT_TOKEN`. Add the bot to your server with the
+`applications.commands` scope and set `DISCORD_GUILD_ID`, then run
+`python services/discord-bot/register_commands.py` to register the commands.
+In the application's General Information page, set **Interactions Endpoint
+URL** to `https://<your-public-domain>/api/v2/discord/interactions`. Discord
+must reach that HTTPS URL; localhost alone will not work. The integration
+provides `/ping`, `/market`, `/bug-report`, and moderator-only `/review-bug`.
+See [the Discord bot setup guide](services/discord-bot/README.md) for details.
+The OAuth redirect URI is a separate setting.
+
 The API, OAuth integration, authorized external market providers, moderation
 staff, and production environment must be operated/configured by the deployment
 owner. Provider adapters remain disabled until their API contracts are
 approved. WebSocket fan-out currently expects one API instance. Supporter
-payment processing and an independent Discord bot are not included.
+payment processing and role synchronization are not included.
 
 ### Version 2 checks
 

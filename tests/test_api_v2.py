@@ -1,10 +1,14 @@
+import json
 import os
 import sys
+import time
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -19,7 +23,16 @@ os.environ["JWT_SECRET"] = "test-only-secret-with-more-than-32-bytes"
 
 from scip_api.database import Base, get_session
 from scip_api.main import create_app
-from scip_api.models import InventorySnapshot, RefreshSession, Report, User
+from scip_api.models import (
+    BugReport,
+    InventorySnapshot,
+    Location,
+    PatchVersion,
+    RefreshSession,
+    Report,
+    RoutePenalty,
+    User,
+)
 from scip_api.security import create_access_token, hash_refresh_token, utc_after
 
 
@@ -46,6 +59,11 @@ class ApiV2Tests(unittest.TestCase):
 
         app.dependency_overrides[get_session] = override_session
         self.client = TestClient(app)
+        self.discord_signing_key = Ed25519PrivateKey.generate()
+        self.discord_public_key = self.discord_signing_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        ).hex()
         self.headers = {"Authorization": f"Bearer {create_access_token(self.user_id)}"}
 
     def tearDown(self):
@@ -68,6 +86,25 @@ class ApiV2Tests(unittest.TestCase):
         }
         data.update(overrides)
         return data
+
+    def post_discord_interaction(self, payload, *, timestamp=None, public_key=None):
+        payload.setdefault("id", str(time.time_ns()))
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        signed_at = str(
+            int(datetime.now(timezone.utc).timestamp()) if timestamp is None else timestamp
+        )
+        signature = self.discord_signing_key.sign(signed_at.encode() + body).hex()
+        env = {"DISCORD_PUBLIC_KEY": public_key or self.discord_public_key}
+        with patch.dict(os.environ, env):
+            return self.client.post(
+                "/api/v2/discord/interactions",
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Signature-Ed25519": signature,
+                    "X-Signature-Timestamp": signed_at,
+                },
+            )
 
     def test_report_submission_is_authenticated_and_pending_review(self):
         unauthorized = self.client.post("/api/v2/reports", json=self.report())
@@ -380,6 +417,110 @@ class ApiV2Tests(unittest.TestCase):
             with self.assertRaises(WebSocketDisconnect):
                 with self.client.websocket_connect(url):
                     pass
+
+    def test_discord_interactions_validate_signature_and_answer_ping(self):
+        response = self.post_discord_interaction({"type": 1})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"type": 1})
+
+        expired = self.post_discord_interaction(
+            {"type": 1},
+            timestamp=int(datetime.now(timezone.utc).timestamp()) - 600,
+        )
+        self.assertEqual(expired.status_code, 401)
+
+        invalid_key = self.post_discord_interaction({"type": 1}, public_key="00" * 32)
+        self.assertEqual(invalid_key.status_code, 401)
+
+    def test_discord_bug_report_command_stores_report(self):
+        payload = {
+            "type": 2,
+            "member": {"user": {"id": "987654321"}},
+            "data": {
+                "name": "bug-report",
+                "options": [
+                    {"name": "category", "value": "cargo-bug"},
+                    {"name": "description", "value": "Cargo inventory disappeared after docking."},
+                ],
+            },
+        }
+        response = self.post_discord_interaction(payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("submitted for moderator review", response.json()["data"]["content"])
+        replay = self.post_discord_interaction(payload)
+        self.assertIn("already handled", replay.json()["data"]["content"])
+        with self.Session() as session:
+            bug = session.query(BugReport).one()
+            self.assertEqual(bug.category, "cargo-bug")
+            self.assertEqual(bug.status, "open")
+
+    def test_discord_market_command_shows_only_confirmed_reports(self):
+        submitted = self.client.post(
+            "/api/v2/reports",
+            json=self.report(),
+            headers=self.headers,
+        )
+        with self.Session() as session:
+            session.get(Report, submitted.json()["id"]).review_status = "confirmed"
+            session.commit()
+
+        response = self.post_discord_interaction({
+            "type": 2,
+            "member": {"user": {"id": "987654321"}},
+            "data": {
+                "name": "market",
+                "options": [
+                    {"name": "patch", "value": "4.0"},
+                    {"name": "shard", "value": "A"},
+                ],
+            },
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("Silicon", response.json()["data"]["content"])
+        self.assertIn("buy 500", response.json()["data"]["content"])
+
+    def test_discord_bug_review_is_moderator_gated_and_applies_penalty(self):
+        with self.Session() as session:
+            location = Location(name="Levski")
+            patch_version = PatchVersion(id="4.0", label="4.0")
+            session.add_all([location, patch_version])
+            session.flush()
+            bug = BugReport(
+                category="terminal-outage",
+                location_id=location.id,
+                patch_version=patch_version.id,
+                description="Terminal outage at Levski.",
+            )
+            session.add(bug)
+            session.commit()
+            bug_id = bug.id
+
+        payload = {
+            "type": 2,
+            "member": {"user": {"id": "987654321"}},
+            "data": {
+                "name": "review-bug",
+                "options": [
+                    {"name": "bug_id", "value": bug_id},
+                    {"name": "decision", "value": "confirmed"},
+                    {"name": "route_penalty", "value": 0.4},
+                ],
+            },
+        }
+        denied = self.post_discord_interaction(payload)
+        self.assertEqual(denied.status_code, 200, denied.text)
+        self.assertIn("Moderator permissions are required", denied.json()["data"]["content"])
+
+        payload["id"] = str(time.time_ns())
+        with patch.dict(os.environ, {"SCIP_MODERATOR_DISCORD_IDS": "987654321"}):
+            approved = self.post_discord_interaction(payload)
+        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertIn("marked **confirmed**", approved.json()["data"]["content"])
+        with self.Session() as session:
+            self.assertEqual(session.get(BugReport, bug_id).status, "confirmed")
+            penalty = session.query(RoutePenalty).one()
+            self.assertEqual(penalty.penalty, 0.4)
+            self.assertTrue(penalty.is_active)
 
     def test_only_moderators_can_confirm_reports(self):
         response = self.client.post(
