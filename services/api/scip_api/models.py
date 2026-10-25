@@ -54,6 +54,8 @@ class Location(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    planet: Mapped[str | None] = mapped_column(String(100))
+    moon: Mapped[str | None] = mapped_column(String(100))
     system: Mapped[str] = mapped_column(String(100), default="Stanton")
     location_type: Mapped[str] = mapped_column(String(40), default="terminal")
     parent_id: Mapped[str | None] = mapped_column(ForeignKey("locations.id"))
@@ -66,7 +68,127 @@ class Commodity(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     aliases: Mapped[list] = mapped_column(JSON, default=list)
+    category: Mapped[str | None] = mapped_column(String(100), index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    legal_status: Mapped[str | None] = mapped_column(String(40))
+    base_price: Mapped[int | None] = mapped_column(Integer)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class CommodityPrice(Base):
+    __tablename__ = "commodity_prices"
+    __table_args__ = (
+        CheckConstraint("buy_price IS NULL OR buy_price >= 0", name="ck_catalog_buy_nonnegative"),
+        CheckConstraint("sell_price IS NULL OR sell_price >= 0", name="ck_catalog_sell_nonnegative"),
+        CheckConstraint("supply IS NULL OR supply >= 0", name="ck_catalog_supply_nonnegative"),
+        CheckConstraint("demand IS NULL OR demand >= 0", name="ck_catalog_demand_nonnegative"),
+        CheckConstraint(
+            "confidence_score >= 0 AND confidence_score <= 1",
+            name="ck_catalog_confidence_range",
+        ),
+        UniqueConstraint("source", "external_id", name="uq_commodity_price_source_external"),
+        Index("ix_commodity_price_latest", "commodity_id", "location_id", "observed_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    commodity_id: Mapped[str] = mapped_column(ForeignKey("commodities.id", ondelete="CASCADE"), index=True)
+    location_id: Mapped[str] = mapped_column(ForeignKey("locations.id", ondelete="CASCADE"), index=True)
+    buy_price: Mapped[int | None] = mapped_column(Integer)
+    sell_price: Mapped[int | None] = mapped_column(Integer)
+    supply: Mapped[int | None] = mapped_column(Integer)
+    demand: Mapped[int | None] = mapped_column(Integer)
+    confidence_score: Mapped[float] = mapped_column(Float, default=0.5)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    patch_version: Mapped[str] = mapped_column(String(80), default="live", index=True)
+    server_shard: Mapped[str] = mapped_column(String(100), default="global", index=True)
+    source: Mapped[str] = mapped_column(String(60), index=True)
+    external_id: Mapped[str | None] = mapped_column(String(180))
+    commodity: Mapped[Commodity] = relationship()
+    location: Mapped[Location] = relationship()
+
+
+class Ship(Base):
+    __tablename__ = "ships"
+    __table_args__ = (
+        UniqueConstraint("manufacturer", "name", name="uq_ship_manufacturer_name"),
+        CheckConstraint("cargo_capacity_scu >= 0", name="ck_ship_capacity_nonnegative"),
+        CheckConstraint("crew_min >= 0 AND crew_max >= crew_min", name="ck_ship_crew_range"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    manufacturer: Mapped[str] = mapped_column(String(120), default="")
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    role: Mapped[str | None] = mapped_column(String(100), index=True)
+    cargo_capacity_scu: Mapped[float] = mapped_column(Float, default=0)
+    quantum_fuel: Mapped[float | None] = mapped_column(Float)
+    hydrogen_fuel: Mapped[float | None] = mapped_column(Float)
+    crew_min: Mapped[int] = mapped_column(Integer, default=1)
+    crew_max: Mapped[int] = mapped_column(Integer, default=1)
+    price_auec: Mapped[int | None] = mapped_column(Integer)
+    price_usd: Mapped[float | None] = mapped_column(Float)
+    is_flyable: Mapped[bool] = mapped_column(Boolean, default=True)
+    image_url: Mapped[str | None] = mapped_column(String(2048))
+    description: Mapped[str | None] = mapped_column(Text)
+    specifications: Mapped[dict] = mapped_column(JSON, default=dict)
+    patch_version: Mapped[str] = mapped_column(String(80), default="live", index=True)
+    source: Mapped[str] = mapped_column(String(60), default="manual")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class Component(Base):
+    __tablename__ = "components"
+    __table_args__ = (
+        UniqueConstraint("name", "type", "size", "manufacturer", name="uq_component_identity"),
+        CheckConstraint("size >= 0", name="ck_component_size_nonnegative"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    type: Mapped[str] = mapped_column(String(80), index=True)
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    grade: Mapped[str | None] = mapped_column(String(20))
+    manufacturer: Mapped[str] = mapped_column(String(120), default="")
+    source: Mapped[str] = mapped_column(String(60), default="manual")
+
+
+class ShipComponent(Base):
+    __tablename__ = "ship_components"
+    __table_args__ = (UniqueConstraint("ship_id", "component_id", name="uq_ship_component"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    ship_id: Mapped[str] = mapped_column(ForeignKey("ships.id", ondelete="CASCADE"), index=True)
+    component_id: Mapped[str] = mapped_column(ForeignKey("components.id", ondelete="CASCADE"), index=True)
+
+
+class FleetProfile(Base):
+    __tablename__ = "fleet_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    fleet_name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    ships: Mapped[list["FleetShip"]] = relationship(
+        back_populates="fleet", cascade="all, delete-orphan"
+    )
+
+
+class FleetShip(Base):
+    __tablename__ = "fleet_ships"
+    __table_args__ = (
+        UniqueConstraint("fleet_id", "ship_id", name="uq_fleet_ship"),
+        CheckConstraint("quantity > 0", name="ck_fleet_ship_quantity_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    fleet_id: Mapped[str] = mapped_column(ForeignKey("fleet_profiles.id", ondelete="CASCADE"), index=True)
+    ship_id: Mapped[str] = mapped_column(ForeignKey("ships.id", ondelete="CASCADE"), index=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    fleet: Mapped[FleetProfile] = relationship(back_populates="ships")
+    ship: Mapped[Ship] = relationship()
 
 
 class PatchVersion(Base):
@@ -280,6 +402,7 @@ class SourceIngestion(Base):
     source: Mapped[str] = mapped_column(String(60), index=True)
     status: Mapped[str] = mapped_column(String(30), index=True)
     records_seen: Mapped[int] = mapped_column(Integer, default=0)
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
     error_summary: Mapped[str | None] = mapped_column(String(500))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

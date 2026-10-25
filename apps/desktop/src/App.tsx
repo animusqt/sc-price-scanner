@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   API_BASE,
+  getCatalogShips,
   getHistory,
   getMarkets,
   getRoutes,
@@ -9,8 +10,15 @@ import {
   scanOcrImage,
   submitOcrReport,
 } from "./api";
+import {
+  CommodityBrowserPage,
+  DataImportPage,
+  FleetManagerPage,
+  ShipBrowserPage,
+} from "./DataPages";
 import type {
   HistoryPoint,
+  CatalogShip,
   MarketRow,
   OcrCommodity,
   OcrReport,
@@ -21,26 +29,24 @@ import type {
   SourceStatus,
 } from "./types";
 
-type Page = "Dashboard" | "Commodities" | "OCR Upload" | "Routes" | "Fleet" | "Analytics" | "Replay" | "Settings";
+type Page = "Dashboard" | "Commodities" | "Ships" | "Routes" | "Fleet" | "OCR Upload" | "Analytics" | "Replay" | "Data Import" | "Settings";
 type Theme = "dark" | "light";
 
 const pages: Page[] = [
   "Dashboard",
   "Commodities",
-  "OCR Upload",
+  "Ships",
   "Routes",
   "Fleet",
+  "OCR Upload",
   "Analytics",
   "Replay",
+  "Data Import",
   "Settings",
 ];
-const pageIcons = ["◈", "▦", "⌗", "⌁", "◇", "▤", "◷", "⚙"];
+const pageIcons = ["◈", "▦", "◇", "⌁", "⌘", "⌗", "▤", "◷", "⇧", "⚙"];
 const ocrQueueKey = "scip.ocr.queue";
 const money = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const defaultShip: Ship[] = [
-  { id: "starter", name: "My ship", capacity: 100, favorite: true, notes: "" },
-];
-
 function readOcrQueue(): { items: PendingOcrUpload[]; error: string } {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(ocrQueueKey) || "[]");
@@ -60,7 +66,7 @@ function readShips(): Ship[] {
   } catch {
     localStorage.removeItem("scip.fleet");
   }
-  return defaultShip;
+  return [];
 }
 
 function readTheme(): Theme {
@@ -175,22 +181,23 @@ function App() {
   const [routes, setRoutes] = useState<Route[]>([]);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("Connecting to local SCIP data service");
-  const [search, setSearch] = useState("");
   const [ships, setShips] = useState(readShips);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [historyCommodity, setHistoryCommodity] = useState("");
   const [historyLocation, setHistoryLocation] = useState("");
   const [days, setDays] = useState(7);
-  const [capacity, setCapacity] = useState(() => ships[0]?.capacity ?? 100);
+  const [capacity, setCapacity] = useState(1);
   const [fuelCost, setFuelCost] = useState(0);
   const [fees, setFees] = useState(0);
   const [risk, setRisk] = useState(0.25);
   const [travelHours, setTravelHours] = useState(1);
   const [minimumConfidence, setMinimumConfidence] = useState(0.5);
   const [currentLocation, setCurrentLocation] = useState("");
+  const [routeShipLabel, setRouteShipLabel] = useState("");
   const [availableCredits, setAvailableCredits] = useState(100000);
-  const [selectedShipId, setSelectedShipId] = useState(() => ships[0]?.id ?? "");
-  const [newShipName, setNewShipName] = useState("");
+  const [selectedShipId, setSelectedShipId] = useState("");
+  const [catalogShips, setCatalogShips] = useState<CatalogShip[]>([]);
+  const [catalogShipsError, setCatalogShipsError] = useState("");
   const [backupStatus, setBackupStatus] = useState("");
   const [ocrScan, setOcrScan] = useState<OcrScanResult | null>(null);
   const [ocrLocation, setOcrLocation] = useState("");
@@ -238,6 +245,21 @@ function App() {
   }, [refresh]);
 
   useEffect(() => {
+    let active = true;
+    void getCatalogShips(patch.trim()).then((rows) => {
+      if (active) {
+        setCatalogShips(rows);
+        setCatalogShipsError("");
+      }
+    }).catch((cause: unknown) => {
+      if (active) setCatalogShipsError(cause instanceof Error ? cause.message : "Ship catalog is unavailable.");
+    });
+    return () => {
+      active = false;
+    };
+  }, [patch]);
+
+  useEffect(() => {
     localStorage.setItem("scip.fleet", JSON.stringify(ships));
   }, [ships]);
 
@@ -254,14 +276,6 @@ function App() {
     localStorage.setItem("scip.patch", patch);
     localStorage.setItem("scip.shard", shard);
   }, [patch, shard]);
-
-  const commodities = useMemo(
-    () =>
-      markets.filter((row) =>
-        `${row.commodity} ${row.location}`.toLowerCase().includes(search.toLowerCase()),
-      ),
-    [markets, search],
-  );
 
   const uniqueLocations = useMemo(
     () => [...new Set(markets.map((row) => row.location))].sort(),
@@ -471,26 +485,6 @@ function App() {
     }
   }
 
-  function addShip(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const name = newShipName.trim();
-    if (!name) return;
-    setShips((current) => [
-      ...current,
-      { id: crypto.randomUUID(), name, capacity: 100, favorite: false, notes: "" },
-    ]);
-    setNewShipName("");
-  }
-
-  function removeShip(id: string) {
-    const updatedShips = ships.filter((ship) => ship.id !== id);
-    setShips(updatedShips);
-    if (selectedShipId === id) {
-      setSelectedShipId(updatedShips[0]?.id ?? "");
-      setCapacity(updatedShips[0]?.capacity ?? 100);
-    }
-  }
-
   function downloadBackup() {
     const backup = {
       schemaVersion: 1,
@@ -509,7 +503,7 @@ function App() {
     link.download = `scip-settings-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setBackupStatus("Settings and fleet backup downloaded.");
+    setBackupStatus("Settings and local ship preference backup downloaded. Fleet profiles remain in the API database.");
   }
 
   async function restoreBackup(file: File | undefined) {
@@ -549,7 +543,7 @@ function App() {
       ) {
         setOcrMinimumConfidence(backup.ocrMinimumConfidence);
       }
-      setBackupStatus("Settings and fleet restored from backup.");
+      setBackupStatus("Settings and local ship preferences restored.");
     } catch (cause) {
       setBackupStatus(cause instanceof Error ? cause.message : "Could not restore this backup.");
     }
@@ -622,10 +616,19 @@ function App() {
         )}
 
         {page === "Commodities" && (
-          <section className="page-content">
-            <div className="section-heading"><div><span className="eyebrow">PRICE · SUPPLY · DEMAND</span><h2>Commodity explorer</h2></div><input className="search" aria-label="Search commodities" placeholder="Search commodity or location" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
-            <MarketTable rows={commodities} />
-          </section>
+          <CommodityBrowserPage patch={patch.trim()} shard={shard.trim()} />
+        )}
+
+        {page === "Ships" && (
+          <ShipBrowserPage
+            patch={patch.trim()}
+            onRoutePlan={(shipCapacity, shipName, shipId) => {
+              setCapacity(shipCapacity);
+              setSelectedShipId(shipId ?? "");
+              setRouteShipLabel(shipName);
+              setPage("Routes");
+            }}
+          />
         )}
 
         {page === "OCR Upload" && (
@@ -690,10 +693,16 @@ function App() {
             <form className="panel route-form" onSubmit={calculateRoutes}>
               <label>Current location<select value={currentLocation} onChange={(event) => setCurrentLocation(event.target.value)}><option value="">Any market</option>{uniqueLocations.map((location) => <option key={location}>{location}</option>)}</select></label>
               <label>Ship<select value={selectedShipId} onChange={(event) => {
-                const ship = ships.find((item) => item.id === event.target.value);
+                const ship = catalogShips.find((item) => item.id === event.target.value);
                 setSelectedShipId(event.target.value);
-                if (ship) setCapacity(ship.capacity);
-              }}>{ships.map((ship) => <option key={ship.id} value={ship.id}>{ship.name} · {ship.capacity} SCU</option>)}</select></label>
+                if (ship) {
+                  setCapacity(ship.cargo_capacity_scu);
+                  setRouteShipLabel(ship.name);
+                } else {
+                  setRouteShipLabel("");
+                }
+              }}><option value="">{routeShipLabel || "Select catalog ship or enter capacity"}</option>{catalogShips.map((ship) => <option key={ship.id} value={ship.id}>{ship.name} · {ship.cargo_capacity_scu} SCU</option>)}</select></label>
+              {catalogShipsError && <div className="route-catalog-error" role="status">{catalogShipsError}</div>}
               <NumberField label="Cargo capacity" value={capacity} min={1} onChange={setCapacity} />
               <NumberField label="Available credits" value={availableCredits} min={0} onChange={setAvailableCredits} />
               <NumberField label="Fuel cost" value={fuelCost} min={0} onChange={setFuelCost} />
@@ -713,21 +722,19 @@ function App() {
         )}
 
         {page === "Fleet" && (
-          <section className="page-content">
-            <div className="section-heading"><div><span className="eyebrow">LOCAL PROFILE</span><h2>Fleet manager</h2></div></div>
-            <form className="panel add-ship" onSubmit={addShip}><input aria-label="New ship name" placeholder="Ship name" value={newShipName} onChange={(event) => setNewShipName(event.target.value)} /><button type="submit">Add ship</button></form>
-            <div className="fleet-grid">
-              {ships.map((ship) => (
-                <article className="panel ship-card" key={ship.id}>
-                  <div className="ship-top"><div><span className="eyebrow">VESSEL</span><h3>{ship.name}</h3></div><button className="star-button" aria-label={`Toggle favorite ${ship.name}`} onClick={() => setShips((items) => items.map((item) => item.id === ship.id ? { ...item, favorite: !item.favorite } : item))}>{ship.favorite ? "★" : "☆"}</button></div>
-                  <label>CARGO CAPACITY <input type="number" min="1" value={ship.capacity} onChange={(event) => setShips((items) => items.map((item) => item.id === ship.id ? { ...item, capacity: Number(event.target.value) } : item))} /></label>
-                  <label>NOTES <textarea value={ship.notes} onChange={(event) => setShips((items) => items.map((item) => item.id === ship.id ? { ...item, notes: event.target.value } : item))} /></label>
-                  <button className="danger-button" onClick={() => removeShip(ship.id)}>Remove vessel</button>
-                </article>
-              ))}
-            </div>
-            <p className="muted">Fleet settings are saved locally on this device. Cloud sync can be added when optional account support is introduced.</p>
-          </section>
+          <FleetManagerPage
+            patch={patch.trim()}
+            onRoutePlan={(fleetCapacity, fleetName) => {
+              setCapacity(fleetCapacity);
+              setSelectedShipId("");
+              setRouteShipLabel(fleetName);
+              setPage("Routes");
+            }}
+          />
+        )}
+
+        {page === "Data Import" && (
+          <DataImportPage />
         )}
 
         {page === "Analytics" && (
@@ -755,10 +762,10 @@ function App() {
           <section className="page-content settings-grid">
             <div className="panel"><span className="eyebrow">GENERAL · APPEARANCE</span><h2>Application preferences</h2><label>THEME<select value={theme} onChange={(event) => setTheme(event.target.value as Theme)}><option value="dark">Mobiglas dark</option><option value="light">Light</option></select></label><p className="muted">SCIP is ready to use without creating an account.</p></div>
             <div className="panel"><span className="eyebrow">NOTIFICATIONS</span><h2>Intelligence alerts</h2><label className="setting-toggle"><input type="checkbox" checked={notificationsEnabled} onChange={(event) => setNotificationsEnabled(event.target.checked)} /> Enable market and risk notifications</label><p className="muted">Notification delivery is local-only until a live feed is configured.</p></div>
-            <div className="panel"><span className="eyebrow">FLEET SETTINGS</span><h2>Local fleet</h2><p>{ships.length} saved vessel{ships.length === 1 ? "" : "s"} · {ships.filter((ship) => ship.favorite).length} favorite</p><button className="secondary-button" onClick={() => setPage("Fleet")}>Manage fleet</button></div>
+            <div className="panel"><span className="eyebrow">FLEET SETTINGS</span><h2>Catalog fleet profiles</h2><p>Fleet profiles, vessels, capacity, and value totals are saved in the local API database.</p><button className="secondary-button" onClick={() => setPage("Fleet")}>Manage fleet</button></div>
             <div className="panel"><span className="eyebrow">MARKET SETTINGS</span><h2>Market context</h2><label>PATCH<input value={patch} maxLength={80} onChange={(event) => setPatch(event.target.value)} /></label><label>SERVER SHARD<input value={shard} maxLength={100} onChange={(event) => setShard(event.target.value)} /></label></div>
             <div className="panel"><span className="eyebrow">DATA SOURCES</span><h2>Market connection</h2><p>Local API: <code>{API_BASE}</code></p><SourceList sources={sources} /></div>
-            <div className="panel"><span className="eyebrow">BACKUP AND RESTORE</span><h2>Local preferences</h2><p className="muted">Export or restore your theme, market context, notification preference, and fleet profile.</p><button className="secondary-button" onClick={downloadBackup}>Download backup</button><label>RESTORE BACKUP<input type="file" accept=".json,application/json" onChange={(event) => void restoreBackup(event.target.files?.[0])} /></label>{backupStatus && <small role="status">{backupStatus}</small>}</div>
+            <div className="panel"><span className="eyebrow">BACKUP AND RESTORE</span><h2>Local preferences</h2><p className="muted">Export or restore theme, market context, notification preference, and legacy local ship preferences. Fleet profiles remain in the API database.</p><button className="secondary-button" onClick={downloadBackup}>Download backup</button><label>RESTORE BACKUP<input type="file" accept=".json,application/json" onChange={(event) => void restoreBackup(event.target.files?.[0])} /></label>{backupStatus && <small role="status">{backupStatus}</small>}</div>
             <div className="panel"><span className="eyebrow">SUPPORT SCIP</span><h2>Support the project</h2><p className="muted">Support helps fund development. Supporter benefits are cosmetic and never provide gameplay advantages.</p><div className="support-links"><button disabled>PayPal</button><button disabled>Patreon</button><button disabled>Ko-fi</button></div><small className="muted">Project campaign links must be configured. Profile badges, custom themes, and beta access are not active yet.</small></div>
             <div className="panel"><span className="eyebrow">ABOUT</span><h2>SCIP 2.0</h2><p>Star Citizen Intelligence Platform</p><p className="muted">Desktop-first logistics, market analysis, and route intelligence.</p></div>
           </section>

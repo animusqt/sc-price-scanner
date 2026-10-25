@@ -11,16 +11,27 @@ from fastapi import (
     FastAPI,
     HTTPException,
     Query,
+    Request,
     WebSocket,
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 import sc_analytics
+from .catalog_importers import (
+    API_IMPORTERS,
+    MAX_IMPORT_BYTES,
+    CatalogImportBatch,
+    CsvImporter,
+    JsonImporter,
+    import_catalog_batch,
+    importer_registry,
+    record_ingestion,
+)
 from .access import current_user
 from .database import Base, engine, get_session
 from .limiter import RateLimitMiddleware
@@ -29,8 +40,12 @@ from .models import (
     BugReport,
     Commodity,
     ConfidenceScore,
+    CommodityPrice,
+    Component,
     Device,
     ForecastRecord,
+    FleetProfile,
+    FleetShip,
     InventorySnapshot,
     Location,
     MarketObservation,
@@ -39,6 +54,9 @@ from .models import (
     RouteHistory,
     RoutePenalty,
     ServerShard,
+    Ship,
+    ShipComponent,
+    SourceIngestion,
     SupporterProfile,
     TelemetryEvent,
     User,
@@ -49,6 +67,9 @@ from .schemas import (
     BugReportCreate,
     BugReview,
     DeviceCreate,
+    FleetProfileCreate,
+    FleetProfileUpdate,
+    FleetShipUpdate,
     OcrImageRequest,
     OcrSubmitRequest,
     ReportCreate,
@@ -177,7 +198,7 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
             "http://tauri.localhost",
             "tauri://localhost",
         ],
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Accept", "Content-Type", "Authorization"],
     )
     @application.middleware("http")
@@ -342,16 +363,414 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
         ).all()
         return [{"id": row.id, "name": row.name, "aliases": row.aliases or []} for row in rows]
 
+    @application.get("/api/v2/importers")
+    def list_importers():
+        return importer_registry()
+
+    def apply_catalog_import(source: str, batch: CatalogImportBatch, session: Session):
+        try:
+            counts = import_catalog_batch(session, source, batch)
+            record_ingestion(session, source, batch, counts)
+        except ValueError as exc:
+            session.rollback()
+            record_ingestion(session, source, batch, None, str(exc))
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "source": source,
+            **counts,
+            "records_seen": sum(
+                len(getattr(batch, key)) for key in CatalogImportBatch.model_fields
+            ),
+        }
+
+    @application.post("/api/v2/imports/json")
+    async def import_json(request: Request, session: Session = Depends(get_session)):
+        body = await request.body()
+        if len(body) > MAX_IMPORT_BYTES:
+            raise HTTPException(status_code=413, detail="JSON import exceeds the 10 MiB size limit.")
+        try:
+            batch = JsonImporter().parse_json(await request.json())
+        except (ValueError, UnicodeDecodeError) as exc:
+            record_ingestion(session, "json-import", None, None, str(exc))
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return apply_catalog_import("json-import", batch, session)
+
+    @application.post("/api/v2/imports/csv")
+    async def import_csv(
+        request: Request,
+        record_type: str = Query(min_length=1, max_length=40),
+        session: Session = Depends(get_session),
+    ):
+        body = await request.body()
+        if len(body) > MAX_IMPORT_BYTES:
+            raise HTTPException(status_code=413, detail="CSV import exceeds the 10 MiB size limit.")
+        try:
+            content = body.decode("utf-8-sig")
+            batch = CsvImporter().parse_csv(content, record_type)
+        except (ValueError, UnicodeDecodeError) as exc:
+            record_ingestion(session, "csv-import", None, None, str(exc))
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return apply_catalog_import("csv-import", batch, session)
+
+    @application.post("/api/v2/imports/api/{source_key}")
+    async def import_source_api(
+        source_key: str,
+        session: Session = Depends(get_session),
+    ):
+        importer = API_IMPORTERS.get(source_key)
+        if importer is None:
+            raise HTTPException(status_code=404, detail="Unknown catalog API source.")
+        try:
+            payload = await importer.fetch_json()
+            batch = importer.parse_json(payload)
+        except ValueError as exc:
+            record_ingestion(session, source_key, None, None, str(exc))
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return apply_catalog_import(source_key, batch, session)
+
+    @application.get("/api/v2/imports/history")
+    def import_history(
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        session: Session = Depends(get_session),
+    ):
+        ingestions = session.scalars(
+            select(SourceIngestion).order_by(SourceIngestion.started_at.desc()).limit(limit)
+        ).all()
+        return [
+            {
+                "id": item.id,
+                "source": item.source,
+                "status": item.status,
+                "records_seen": item.records_seen,
+                "result": item.result_json or {},
+                "error": item.error_summary,
+                "started_at": _utc_iso(item.started_at),
+                "completed_at": _utc_iso(item.completed_at) if item.completed_at else None,
+            }
+            for item in ingestions
+        ]
+
+    @application.get("/api/v2/catalog/commodities")
+    def browse_commodities(
+        search: str | None = Query(default=None, max_length=160),
+        category: str | None = Query(default=None, max_length=100),
+        min_profit: int | None = Query(default=None, ge=0),
+        min_supply: int | None = Query(default=None, ge=0),
+        max_supply: int | None = Query(default=None, ge=0),
+        min_demand: int | None = Query(default=None, ge=0),
+        max_demand: int | None = Query(default=None, ge=0),
+        patch_version: str = Query(default="live", min_length=1, max_length=80),
+        server_shard: str = Query(default="global", min_length=1, max_length=100),
+        limit: Annotated[int, Query(ge=1, le=5000)] = 5000,
+        session: Session = Depends(get_session),
+    ):
+        statement = select(Commodity).where(Commodity.is_active.is_(True)).order_by(Commodity.name)
+        if search:
+            statement = statement.where(Commodity.name.ilike(f"%{search.strip()}%"))
+        if category:
+            statement = statement.where(func.lower(Commodity.category) == category.strip().casefold())
+        commodity_rows = session.scalars(statement.limit(limit)).all()
+        if not commodity_rows:
+            return []
+
+        prices = session.scalars(
+            select(CommodityPrice)
+            .where(
+                CommodityPrice.commodity_id.in_([row.id for row in commodity_rows]),
+                CommodityPrice.patch_version == patch_version,
+                CommodityPrice.server_shard == server_shard,
+                CommodityPrice.observed_at >= utcnow() - timedelta(days=7),
+            )
+            .options(joinedload(CommodityPrice.location))
+            .order_by(CommodityPrice.observed_at.desc())
+            .limit(50_000)
+        ).all()
+        latest_by_market: dict[tuple[str, str], CommodityPrice] = {}
+        for price in prices:
+            latest_by_market.setdefault((price.commodity_id, price.location_id), price)
+        by_commodity: dict[str, list[CommodityPrice]] = {}
+        for price in latest_by_market.values():
+            by_commodity.setdefault(price.commodity_id, []).append(price)
+
+        result = []
+        for commodity in commodity_rows:
+            observations = by_commodity.get(commodity.id, [])
+            buy_values = [price for price in observations if price.buy_price is not None]
+            sell_values = [price for price in observations if price.sell_price is not None]
+            best_buy = min(buy_values, key=lambda price: price.buy_price) if buy_values else None
+            best_sell = max(sell_values, key=lambda price: price.sell_price) if sell_values else None
+            supply_values = [price.supply for price in observations if price.supply is not None]
+            demand_values = [price.demand for price in observations if price.demand is not None]
+            average_price_values = [
+                value
+                for price in observations
+                for value in (price.buy_price, price.sell_price)
+                if value is not None
+            ]
+            profit = (
+                best_sell.sell_price - best_buy.buy_price
+                if best_buy and best_sell
+                else None
+            )
+            supply = round(sum(supply_values) / len(supply_values)) if supply_values else None
+            demand = round(sum(demand_values) / len(demand_values)) if demand_values else None
+            if min_profit is not None and (profit is None or profit < min_profit):
+                continue
+            if min_supply is not None and (supply is None or supply < min_supply):
+                continue
+            if max_supply is not None and (supply is None or supply > max_supply):
+                continue
+            if min_demand is not None and (demand is None or demand < min_demand):
+                continue
+            if max_demand is not None and (demand is None or demand > max_demand):
+                continue
+            result.append({
+                "id": commodity.id,
+                "name": commodity.name,
+                "category": commodity.category,
+                "description": commodity.description,
+                "legal_status": commodity.legal_status,
+                "base_price": commodity.base_price,
+                "current_price": (
+                    round(sum(average_price_values) / len(average_price_values))
+                    if average_price_values else commodity.base_price
+                ),
+                "average_price": (
+                    round(sum(average_price_values) / len(average_price_values))
+                    if average_price_values else None
+                ),
+                "supply": supply,
+                "demand": demand,
+                "profit": profit,
+                "best_buy_location": best_buy.location.name if best_buy else None,
+                "best_buy_price": best_buy.buy_price if best_buy else None,
+                "best_sell_location": best_sell.location.name if best_sell else None,
+                "best_sell_price": best_sell.sell_price if best_sell else None,
+                "confidence": (
+                    round(sum(price.confidence_score for price in observations) / len(observations), 4)
+                    if observations else None
+                ),
+                "updated_at": (
+                    _utc_iso(max(price.observed_at for price in observations))
+                    if observations else None
+                ),
+            })
+        return result
+
+    @application.get("/api/v2/ships")
+    def browse_ships(
+        search: str | None = Query(default=None, max_length=160),
+        manufacturer: str | None = Query(default=None, max_length=120),
+        role: str | None = Query(default=None, max_length=100),
+        min_cargo: float | None = Query(default=None, ge=0),
+        max_cargo: float | None = Query(default=None, ge=0),
+        patch_version: str = Query(default="live", min_length=1, max_length=80),
+        limit: Annotated[int, Query(ge=1, le=5000)] = 5000,
+        session: Session = Depends(get_session),
+    ):
+        statement = select(Ship).where(
+            Ship.is_active.is_(True),
+            Ship.patch_version == patch_version,
+        ).order_by(Ship.name)
+        if search:
+            statement = statement.where(Ship.name.ilike(f"%{search.strip()}%"))
+        if manufacturer:
+            statement = statement.where(Ship.manufacturer.ilike(f"%{manufacturer.strip()}%"))
+        if role:
+            statement = statement.where(func.lower(Ship.role) == role.strip().casefold())
+        if min_cargo is not None:
+            statement = statement.where(Ship.cargo_capacity_scu >= min_cargo)
+        if max_cargo is not None:
+            statement = statement.where(Ship.cargo_capacity_scu <= max_cargo)
+        rows = session.scalars(statement.limit(limit)).all()
+        return [
+            {
+                "id": row.id,
+                "name": row.name,
+                "manufacturer": row.manufacturer,
+                "role": row.role,
+                "cargo_capacity_scu": row.cargo_capacity_scu,
+                "quantum_fuel": row.quantum_fuel,
+                "hydrogen_fuel": row.hydrogen_fuel,
+                "crew_min": row.crew_min,
+                "crew_max": row.crew_max,
+                "price_auec": row.price_auec,
+                "price_usd": row.price_usd,
+                "is_flyable": row.is_flyable,
+                "image_url": row.image_url,
+                "description": row.description,
+                "specifications": row.specifications or {},
+            }
+            for row in rows
+        ]
+
+    @application.get("/api/v2/components")
+    def browse_components(
+        search: str | None = Query(default=None, max_length=160),
+        component_type: str | None = Query(default=None, max_length=80),
+        limit: Annotated[int, Query(ge=1, le=5000)] = 5000,
+        session: Session = Depends(get_session),
+    ):
+        statement = select(Component).order_by(Component.name, Component.size)
+        if search:
+            statement = statement.where(Component.name.ilike(f"%{search.strip()}%"))
+        if component_type:
+            statement = statement.where(
+                func.lower(Component.type) == component_type.strip().casefold()
+            )
+        rows = session.scalars(statement.limit(limit)).all()
+        return [
+            {
+                "id": row.id,
+                "name": row.name,
+                "type": row.type,
+                "size": row.size,
+                "grade": row.grade,
+                "manufacturer": row.manufacturer,
+            }
+            for row in rows
+        ]
+
+    def fleet_response(fleet: FleetProfile):
+        ships = [
+            {
+                "ship_id": entry.ship.id,
+                "quantity": entry.quantity,
+                "name": entry.ship.name,
+                "manufacturer": entry.ship.manufacturer,
+                "cargo_capacity_scu": entry.ship.cargo_capacity_scu,
+                "price_auec": entry.ship.price_auec,
+            }
+            for entry in fleet.ships
+        ]
+        return {
+            "id": fleet.id,
+            "fleet_name": fleet.fleet_name,
+            "description": fleet.description,
+            "ships": ships,
+            "total_scu": sum(ship["cargo_capacity_scu"] * ship["quantity"] for ship in ships),
+            "total_value_auec": sum((ship["price_auec"] or 0) * ship["quantity"] for ship in ships),
+        }
+
+    @application.get("/api/v2/fleets")
+    def list_fleets(session: Session = Depends(get_session)):
+        rows = session.scalars(
+            select(FleetProfile).options(joinedload(FleetProfile.ships).joinedload(FleetShip.ship))
+            .order_by(FleetProfile.fleet_name)
+        ).unique().all()
+        return [fleet_response(row) for row in rows]
+
+    @application.post("/api/v2/fleets", status_code=201)
+    def create_fleet(payload: FleetProfileCreate, session: Session = Depends(get_session)):
+        existing = session.scalar(
+            select(FleetProfile).where(
+                func.lower(FleetProfile.fleet_name) == payload.fleet_name.casefold()
+            )
+        )
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="A fleet with that name already exists.")
+        fleet = FleetProfile(fleet_name=payload.fleet_name, description=payload.description)
+        session.add(fleet)
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            session.rollback()
+            raise HTTPException(status_code=409, detail="A fleet with that name already exists.") from exc
+        session.refresh(fleet)
+        return fleet_response(fleet)
+
+    @application.put("/api/v2/fleets/{fleet_id}")
+    def update_fleet(
+        fleet_id: str,
+        payload: FleetProfileUpdate,
+        session: Session = Depends(get_session),
+    ):
+        fleet = session.scalar(
+            select(FleetProfile).where(FleetProfile.id == fleet_id)
+            .options(joinedload(FleetProfile.ships).joinedload(FleetShip.ship))
+        )
+        if fleet is None:
+            raise HTTPException(status_code=404, detail="Fleet not found.")
+        duplicate = session.scalar(
+            select(FleetProfile).where(
+                FleetProfile.id != fleet.id,
+                func.lower(FleetProfile.fleet_name) == payload.fleet_name.casefold(),
+            )
+        )
+        if duplicate is not None:
+            raise HTTPException(status_code=409, detail="A fleet with that name already exists.")
+        fleet.fleet_name = payload.fleet_name
+        fleet.description = payload.description
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            session.rollback()
+            raise HTTPException(status_code=409, detail="A fleet with that name already exists.") from exc
+        return fleet_response(fleet)
+
+    @application.delete("/api/v2/fleets/{fleet_id}", status_code=204)
+    def delete_fleet(fleet_id: str, session: Session = Depends(get_session)):
+        fleet = session.get(FleetProfile, fleet_id)
+        if fleet is None:
+            raise HTTPException(status_code=404, detail="Fleet not found.")
+        session.delete(fleet)
+        session.commit()
+
+    @application.post("/api/v2/fleets/{fleet_id}/ships")
+    def add_fleet_ship(
+        fleet_id: str,
+        payload: FleetShipUpdate,
+        session: Session = Depends(get_session),
+    ):
+        fleet = session.get(FleetProfile, fleet_id)
+        ship = session.get(Ship, payload.ship_id)
+        if fleet is None:
+            raise HTTPException(status_code=404, detail="Fleet not found.")
+        if ship is None or not ship.is_active:
+            raise HTTPException(status_code=404, detail="Active ship not found.")
+        entry = session.scalar(select(FleetShip).where(
+            FleetShip.fleet_id == fleet.id,
+            FleetShip.ship_id == ship.id,
+        ))
+        if entry is None:
+            session.add(FleetShip(fleet_id=fleet.id, ship_id=ship.id, quantity=payload.quantity))
+        else:
+            entry.quantity = payload.quantity
+        session.commit()
+        fleet = session.scalar(
+            select(FleetProfile).where(FleetProfile.id == fleet_id)
+            .options(joinedload(FleetProfile.ships).joinedload(FleetShip.ship))
+        )
+        return fleet_response(fleet)
+
+    @application.delete("/api/v2/fleets/{fleet_id}/ships/{ship_id}", status_code=204)
+    def remove_fleet_ship(fleet_id: str, ship_id: str, session: Session = Depends(get_session)):
+        entry = session.scalar(select(FleetShip).where(
+            FleetShip.fleet_id == fleet_id,
+            FleetShip.ship_id == ship_id,
+        ))
+        if entry is None:
+            raise HTTPException(status_code=404, detail="Ship is not in this fleet.")
+        session.delete(entry)
+        session.commit()
+
     @application.get("/api/v2/locations")
     def list_locations(
         session: Session = Depends(get_session),
-        limit: Annotated[int, Query(ge=1, le=500)] = 200,
+        limit: Annotated[int, Query(ge=1, le=5000)] = 5000,
     ):
         rows = session.scalars(
             select(Location).where(Location.is_active.is_(True)).order_by(Location.name).limit(limit)
         ).all()
         return [
-            {"id": row.id, "name": row.name, "system": row.system, "type": row.location_type}
+            {
+                "id": row.id,
+                "name": row.name,
+                "planet": row.planet,
+                "moon": row.moon,
+                "system": row.system,
+                "type": row.location_type,
+            }
             for row in rows
         ]
 
@@ -497,7 +916,10 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
                 Report.patch_version == patch_version,
                 Report.server_shard == server_shard,
                 Report.review_status.in_(("pending", "confirmed")),
-                MarketObservation.observed_at >= utcnow() - timedelta(days=7),
+                func.coalesce(
+                    MarketObservation.observed_at,
+                    Report.observed_at,
+                ) >= utcnow() - timedelta(days=7),
             )
             .options(
                 joinedload(MarketObservation.report).joinedload(Report.location),
@@ -537,6 +959,58 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
                 "stock": values["stock"],
                 "demand": values["demand"],
             })
+        imported_prices = session.scalars(
+            select(CommodityPrice)
+            .join(CommodityPrice.commodity)
+            .join(CommodityPrice.location)
+            .where(
+                CommodityPrice.patch_version == patch_version,
+                CommodityPrice.server_shard == server_shard,
+                CommodityPrice.observed_at >= utcnow() - timedelta(days=7),
+            )
+            .options(
+                joinedload(CommodityPrice.commodity),
+                joinedload(CommodityPrice.location),
+            )
+            .order_by(CommodityPrice.observed_at.desc())
+            .limit(50_000)
+        ).all()
+        merged = {(row["location"], row["commodity"]): row for row in response}
+        latest_imported: dict[tuple[str, str], CommodityPrice] = {}
+        for price in imported_prices:
+            latest_imported.setdefault((price.location.name, price.commodity.name), price)
+        for (location_name, commodity_name), price in latest_imported.items():
+            row = merged.setdefault((location_name, commodity_name), {
+                "location": location_name,
+                "commodity": commodity_name,
+                "patch_version": patch_version,
+                "server_shard": server_shard,
+                "buy": [],
+                "sell": [],
+                "stock": [],
+                "demand": [],
+            })
+            current_timestamps = [
+                value.get("latest_observed_at")
+                for field in ("buy", "sell", "stock", "demand")
+                for value in row[field]
+                if value.get("latest_observed_at")
+            ]
+            if current_timestamps and _utc_iso(price.observed_at) < max(current_timestamps):
+                continue
+            for key, value in (
+                ("buy", price.buy_price),
+                ("sell", price.sell_price),
+                ("stock", price.supply),
+                ("demand", price.demand),
+            ):
+                row[key] = [{
+                        "value": value,
+                        "confidence": price.confidence_score,
+                        "latest_observed_at": _utc_iso(price.observed_at),
+                        "review_status": "live",
+                    }] if value is not None else []
+        response = list(merged.values())
         return response
 
     @application.get("/api/v2/history")
@@ -560,13 +1034,16 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
                 Report.patch_version == patch_version,
                 Report.server_shard == server_shard,
                 Report.review_status.in_(("pending", "confirmed")),
-                MarketObservation.observed_at >= utcnow() - timedelta(days=days),
+                func.coalesce(
+                    MarketObservation.observed_at,
+                    Report.observed_at,
+                ) >= utcnow() - timedelta(days=days),
             )
             .options(joinedload(MarketObservation.report))
-            .order_by(Report.observed_at.desc())
+            .order_by(func.coalesce(MarketObservation.observed_at, Report.observed_at).desc())
             .limit(limit)
         )
-        return [
+        history = [
             {
                 "observed_at": _utc_iso(row.observed_at or row.report.observed_at),
                 "buy": row.buy_price,
@@ -578,6 +1055,31 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
             }
             for row in session.scalars(statement).all()
         ]
+        imported = session.scalars(
+            select(CommodityPrice)
+            .join(CommodityPrice.commodity)
+            .join(CommodityPrice.location)
+            .where(
+                Commodity.name == commodity,
+                Location.name == location,
+                CommodityPrice.patch_version == patch_version,
+                CommodityPrice.server_shard == server_shard,
+                CommodityPrice.observed_at >= utcnow() - timedelta(days=days),
+            )
+            .order_by(CommodityPrice.observed_at.desc())
+            .limit(limit)
+        ).all()
+        history.extend({
+            "observed_at": _utc_iso(row.observed_at),
+            "buy": row.buy_price,
+            "sell": row.sell_price,
+            "stock": row.supply,
+            "demand": row.demand,
+            "ocr_confidence": row.confidence_score,
+            "review_status": "live",
+        } for row in imported)
+        history.sort(key=lambda row: row["observed_at"], reverse=True)
+        return history[:limit]
 
     @application.get("/api/v2/stock-trends")
     def get_stock_trends(
@@ -640,16 +1142,21 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
                 Report.patch_version == payload.patch_version,
                 Report.server_shard == payload.server_shard,
                 Report.review_status == "confirmed",
-                MarketObservation.observed_at >= utcnow() - timedelta(days=7),
+                func.coalesce(
+                    MarketObservation.observed_at,
+                    Report.observed_at,
+                ) >= utcnow() - timedelta(days=7),
             )
+            .order_by(func.coalesce(MarketObservation.observed_at, Report.observed_at).desc())
             .options(
                 joinedload(MarketObservation.report).joinedload(Report.location),
                 joinedload(MarketObservation.commodity),
             )
         )
-        markets = []
+        latest_market: dict[tuple[str, str], tuple[str, dict]] = {}
         for row in session.scalars(statement).all():
-            markets.append({
+            observed_at = row.observed_at or row.report.observed_at
+            market = {
                 "station": row.report.location.name,
                 "commodity": row.commodity.name,
                 "buy": row.buy_price,
@@ -666,7 +1173,40 @@ def create_app(*, create_tables: bool = False) -> FastAPI:
                 )["score"],
                 "patch_version": row.report.patch_version,
                 "server_shard": row.report.server_shard,
+            }
+            key = (market["station"], market["commodity"])
+            latest_market.setdefault(key, (_utc_iso(observed_at), market))
+        imported_prices = session.scalars(
+            select(CommodityPrice)
+            .where(
+                CommodityPrice.patch_version == payload.patch_version,
+                CommodityPrice.server_shard == payload.server_shard,
+                CommodityPrice.observed_at >= utcnow() - timedelta(days=7),
+            )
+            .options(
+                joinedload(CommodityPrice.commodity),
+                joinedload(CommodityPrice.location),
+            )
+            .order_by(CommodityPrice.observed_at.desc())
+            .limit(50_000)
+        ).all()
+        for price in imported_prices:
+            key = (price.location.name, price.commodity.name)
+            observed_at = _utc_iso(price.observed_at)
+            if key in latest_market and latest_market[key][0] >= observed_at:
+                continue
+            latest_market[key] = (observed_at, {
+                "station": price.location.name,
+                "commodity": price.commodity.name,
+                "buy": price.buy_price,
+                "sell": price.sell_price,
+                "stock": price.supply or 0,
+                "demand": price.demand or 0,
+                "confidence": price.confidence_score,
+                "patch_version": price.patch_version,
+                "server_shard": price.server_shard,
             })
+        markets = [value for _, value in latest_market.values()]
         options = payload.model_dump(exclude={"current_location", "available_credits"})
         routes = sc_analytics.recommend_routes(markets, **options)
         if payload.current_location:

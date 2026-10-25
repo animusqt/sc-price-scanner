@@ -23,8 +23,10 @@ For hands-free updates, choose **Start Low-Impact Live Scan**. It checks the cal
 The `apps/desktop` directory contains the React + TypeScript desktop client
 packaged with Tauri 2 and configured to build a per-user Windows NSIS installer.
 It opens directly without an account. The interface includes Dashboard,
-Commodities, OCR Upload, Routes, Fleet, Analytics, Replay, and Settings; fleet
-details and appearance preferences are stored locally. The OCR uploader
+Commodities, Ships, Routes, Fleet, OCR Upload, Analytics, Replay, Data Import,
+and Settings. Catalog and ship data (including viewed ship images) are cached
+locally for offline browsing; fleet profiles are stored in the local API
+database. The OCR uploader
 captures a screen with F9 while SCIP is focused, supports screenshot files,
 validates editable OCR results, and queues failed website submissions locally.
 Support links appear inside Settings.
@@ -43,6 +45,32 @@ Install Tesseract OCR (for example, `winget install UB-Mannheim.TesseractOCR`)
 and add it to `PATH`, or set `$env:TESSERACT_CMD` to the executable path before
 starting the services. To enable website submissions, add
 `SC_TRUCKERS_API_BASE_URL` and the optional `SC_TRUCKERS_API_TOKEN` to `.env`.
+
+### Catalog data and imports
+
+The API stores commodities, locations, timestamped market prices, ships,
+components, ship-component links, and fleet profiles in the SQLAlchemy
+database. Apply migrations with
+`alembic -c services\api\alembic.ini upgrade head`. The desktop's **Data
+Import** page accepts normalized JSON or CSV files and shows import history.
+Imports validate and upsert catalog records; market
+price rows are kept as timestamped snapshots, and live browser/route results
+ignore snapshots older than seven days.
+
+JSON imports use a top-level object with one or more arrays named
+`commodities`, `locations`, `ships`, `components`, `prices`, and
+`ship_components`. CSV imports select one of those record types and use the
+corresponding JSON field names as column headers. The Data Import page contains
+a sample payload.
+
+Optional API importers are prepared for SC Trade Tools, UEX, Hauler, Erkul,
+Star Citizen Wiki, and Lovable. Configure each `SCIP_IMPORT_<SOURCE>_URL` in
+the API server environment (and an optional matching `_TOKEN`). Lovable also
+requires `SCIP_IMPORT_LOVABLE_ALLOWED_HOST`. URLs must use HTTPS and pass the
+source host allowlist. These adapters intentionally accept SCIP's normalized
+JSON envelope; proprietary provider response formats are not guessed or
+silently mapped. A provider-specific mapping can be added once its API
+documentation and response contract are available.
 
 Install Rust with the Windows MSVC toolchain and WebView2, then run the Tauri
 desktop shell in another PowerShell window:
@@ -63,8 +91,10 @@ separately. OCR forwarding is implemented, but website uploads need
 `SC_TRUCKERS_API_TOKEN`) configured on the API server. The website must accept
 the documented report payload and return JSON confirmation; this has not yet
 been verified against a live Lovable endpoint. Market read synchronization
-remains disabled until its separate API contract is supplied. Without synced
-market records, the dashboard and route planner show empty-state guidance. See
+from a proprietary Lovable response remains unavailable until its API contract
+is supplied; normalized market snapshots can be imported through the catalog
+importer in the meantime. Without synced/imported market records, the dashboard
+and route planner show empty-state guidance. See
 [apps/desktop/README.md](apps/desktop/README.md) and [VERSION_2.md](VERSION_2.md)
 for current scope and limitations.
 

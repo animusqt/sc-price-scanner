@@ -169,10 +169,47 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .intel-card strong { font-size: 11px; }.intel-card p, .intel-status p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .intel-status { display: flex; gap: 9px; align-items: flex-start; margin-top: 22px; padding: 12px; border: 1px solid var(--border); background: var(--surface); }
 .intel-foot { margin-top: 28px; color: #637289; font: 8px/1.8 "IBM Plex Mono", monospace; letter-spacing: .08em; }
+.data-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.catalog-filters { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 11px; padding: 14px; }
+.ship-filters { grid-template-columns: repeat(5, minmax(130px, 1fr)); }
+.table-subline { display: block; margin-top: 3px; color: var(--muted); font: 9px "IBM Plex Mono", monospace; }
+.table-empty { margin: 0; padding: 14px; }
+.ship-catalog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.catalog-ship-card { display: grid; gap: 12px; padding: 14px; }
+.catalog-ship-card h3 { margin: 5px 0 0; font-size: 16px; }
+.ship-image-wrap, .ship-image-missing { min-height: 150px; }
+.ship-image-wrap { display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 4px; background: #080d15; }
+.ship-image { display: block; width: 100%; height: 190px; object-fit: contain; }
+.ship-image-missing { display: grid; place-items: center; width: 100%; padding: 12px; color: var(--muted); font-size: 10px; text-align: center; }
+.spec-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.spec-grid span { display: grid; gap: 5px; color: var(--muted); font: 9px "IBM Plex Mono", monospace; }
+.spec-grid strong { color: var(--text); font-size: 10px; font-weight: 500; }
+.catalog-ship-card details { color: var(--muted); font-size: 10px; }
+.catalog-ship-card summary { cursor: pointer; }
+.catalog-ship-card dl { display: grid; gap: 5px; }
+.catalog-ship-card dl div { display: flex; justify-content: space-between; gap: 12px; }
+.catalog-ship-card dt { color: var(--muted); }
+.catalog-ship-card dd { margin: 0; color: var(--text); text-align: right; }
+.fleet-create-form, .fleet-editor, .fleet-add-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 14px; }
+.fleet-create-form label, .fleet-editor label, .fleet-add-form label { flex: 1 1 180px; }
+.fleet-editor { align-items: center; }
+.fleet-ships { display: grid; gap: 12px; padding: 14px; }
+.fleet-ships h3 { margin: 0; font-size: 14px; }
+.quantity-input { width: 88px; }
+.import-panel, .import-history { display: grid; gap: 14px; padding: 15px; }
+.import-file-row { display: grid; grid-template-columns: minmax(180px, 1fr) 180px auto; align-items: end; gap: 12px; }
+.import-file-row input[type="file"] { max-width: 100%; }
+.provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.provider-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-raised); }
+.provider-card strong, .provider-card small { display: block; }
+.provider-card strong { font-size: 11px; }
+.provider-card small { margin-top: 4px; color: var(--muted); font-size: 9px; }
+.code-sample { max-height: 360px; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); font: 10px/1.6 "IBM Plex Mono", monospace; }
 
 @media (max-width: 1160px) {
   .shell { grid-template-columns: 190px minmax(480px, 1fr); }
   .intel { display: none; }
+  .catalog-filters, .ship-filters { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
 }
 @media (max-width: 760px) {
   body { min-width: 360px; }
@@ -188,6 +225,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .topbar { align-items: start; flex-direction: column; }
   .top-controls { flex-wrap: wrap; }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
-  .route-form, .rank-tabs, .fleet-grid, .settings-grid, .replay-form, .ocr-context { grid-template-columns: 1fr; }
+  .route-form, .rank-tabs, .fleet-grid, .settings-grid, .replay-form, .ocr-context, .catalog-filters, .ship-filters, .ship-catalog-grid, .provider-grid { grid-template-columns: 1fr; }
+  .import-file-row { grid-template-columns: 1fr; }
+  .data-actions { align-items: flex-start; flex-direction: column; }
   .ocr-queue li { align-items: start; flex-direction: column; }
 }

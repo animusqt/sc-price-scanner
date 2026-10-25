@@ -90,6 +90,37 @@ class OcrImageRequest(StrictSchema):
     image_base64: str = Field(min_length=1, max_length=28_000_000)
 
 
+class FleetProfileCreate(StrictSchema):
+    fleet_name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=4000)
+
+    @field_validator("fleet_name")
+    @classmethod
+    def trim_fleet_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("fleet_name cannot be blank")
+        return value
+
+
+class FleetProfileUpdate(StrictSchema):
+    fleet_name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=4000)
+
+    @field_validator("fleet_name")
+    @classmethod
+    def trim_updated_fleet_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("fleet_name cannot be blank")
+        return value
+
+
+class FleetShipUpdate(StrictSchema):
+    ship_id: str = Field(min_length=1, max_length=36)
+    quantity: int = Field(default=1, ge=1, le=100_000)
+
+
 class TelemetryCreate(StrictSchema):
     event_name: str = Field(min_length=1, max_length=80)
     metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict, max_length=20)

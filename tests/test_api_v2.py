@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "scanner-engine"))
 os.environ["JWT_SECRET"] = "test-only-secret-with-more-than-32-bytes"
 
 from scip_api.database import Base, get_session
+from scip_api.catalog_importers import API_IMPORTERS
 from scip_api.main import create_app
 from scip_api.models import (
     BugReport,
@@ -95,6 +96,219 @@ class ApiV2Tests(unittest.TestCase):
         }
         data.update(overrides)
         return data
+
+    def test_json_import_updates_commodity_catalog_and_market_prices(self):
+        batch = {
+            "commodities": [
+                {"name": "Silicon", "category": "Mineral", "base_price": 500},
+                {"name": "Scrap", "category": "Recyclable"},
+            ],
+            "locations": [
+                {"name": "Area18", "planet": "ArcCorp", "system": "Stanton"},
+                {"name": "Baijini Point", "planet": "ArcCorp", "system": "Stanton"},
+            ],
+            "prices": [
+                {
+                    "commodity": "Silicon",
+                    "location": "Area18",
+                    "buy_price": 500,
+                    "supply": 100,
+                    "confidence_score": 0.9,
+                    "external_id": "silicon-area18-v1",
+                },
+                {
+                    "commodity": "Silicon",
+                    "location": "Baijini Point",
+                    "sell_price": 900,
+                    "demand": 50,
+                    "confidence_score": 0.8,
+                    "external_id": "silicon-baijini-v1",
+                },
+            ],
+        }
+        first = self.client.post("/api/v2/imports/json", json=batch)
+        second = self.client.post("/api/v2/imports/json", json=batch)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(first.json()["created"], 6)
+        self.assertEqual(second.json()["created"], 0)
+        self.assertEqual(second.json()["updated"], 6)
+
+        result = self.client.get("/api/v2/catalog/commodities", params={
+            "patch_version": "live",
+            "server_shard": "global",
+        })
+        silicon = next(row for row in result.json() if row["name"] == "Silicon")
+        self.assertEqual(silicon["best_buy_location"], "Area18")
+        self.assertEqual(silicon["best_sell_location"], "Baijini Point")
+        self.assertEqual(silicon["profit"], 400)
+        self.assertEqual(silicon["supply"], 100)
+        self.assertEqual(silicon["demand"], 50)
+
+    def test_csv_import_validates_and_upserts_ships(self):
+        csv_content = (
+            "name,manufacturer,role,cargo_capacity_scu,crew_min,crew_max,price_auec\n"
+            "C2 Hercules,Crusader,Transport,696,1,2,49200000\n"
+        )
+        response = self.client.post(
+            "/api/v2/imports/csv?record_type=ships",
+            content=csv_content,
+            headers={"Content-Type": "text/csv"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        ships = self.client.get("/api/v2/ships", params={
+            "search": "herc",
+            "min_cargo": 500,
+            "manufacturer": "crus",
+        })
+        self.assertEqual(ships.status_code, 200)
+        self.assertEqual(ships.json()[0]["name"], "C2 Hercules")
+
+    def test_import_registry_prepares_independent_source_adapters(self):
+        response = self.client.get("/api/v2/importers")
+        self.assertEqual(response.status_code, 200)
+        sources = {item["key"]: item for item in response.json()}
+        self.assertTrue(sources["json-import"]["configured"])
+        self.assertIn("uex", sources)
+        self.assertIn("hauler", sources)
+        self.assertIn("erkul", sources)
+        self.assertIn("star-citizen-wiki", sources)
+        self.assertIn("lovable", sources)
+
+    def test_fleet_crud_calculates_capacity_and_value(self):
+        imported = self.client.post("/api/v2/imports/json", json={
+            "ships": [{
+                "name": "Freelancer MAX",
+                "manufacturer": "MISC",
+                "cargo_capacity_scu": 120,
+                "crew_min": 2,
+                "crew_max": 4,
+                "price_auec": 2000000,
+            }],
+        })
+        self.assertEqual(imported.status_code, 200, imported.text)
+        ship = self.client.get("/api/v2/ships").json()[0]
+        created = self.client.post("/api/v2/fleets", json={
+            "fleet_name": "Trade Group",
+            "description": "Cargo fleet",
+        })
+        self.assertEqual(created.status_code, 201, created.text)
+        fleet_id = created.json()["id"]
+        added = self.client.post(f"/api/v2/fleets/{fleet_id}/ships", json={
+            "ship_id": ship["id"],
+            "quantity": 3,
+        })
+        self.assertEqual(added.status_code, 200, added.text)
+        self.assertEqual(added.json()["total_scu"], 360)
+        self.assertEqual(added.json()["total_value_auec"], 6000000)
+        updated = self.client.put(f"/api/v2/fleets/{fleet_id}", json={
+            "fleet_name": "Haulers",
+            "description": "Renamed fleet",
+        })
+        self.assertEqual(updated.json()["fleet_name"], "Haulers")
+        removed = self.client.delete(f"/api/v2/fleets/{fleet_id}/ships/{ship['id']}")
+        self.assertEqual(removed.status_code, 204)
+        deleted = self.client.delete(f"/api/v2/fleets/{fleet_id}")
+        self.assertEqual(deleted.status_code, 204)
+
+    def test_catalog_import_rejects_invalid_price_and_reports_history(self):
+        invalid = self.client.post("/api/v2/imports/json", json={
+            "prices": [{
+                "commodity": "Silicon",
+                "location": "Area18",
+                "buy_price": -1,
+            }],
+        })
+        self.assertEqual(invalid.status_code, 422)
+        history = self.client.get("/api/v2/imports/history")
+        self.assertTrue(any(item["status"] == "failed" for item in history.json()))
+
+    def test_imported_latest_market_values_drive_route_planning(self):
+        imported = self.client.post("/api/v2/imports/json", json={
+            "prices": [
+                {
+                    "commodity": "Medical Supplies",
+                    "location": "Port Olisar",
+                    "buy_price": 100,
+                    "supply": 75,
+                    "confidence_score": 0.95,
+                    "patch_version": "4.0",
+                    "server_shard": "A",
+                },
+                {
+                    "commodity": "Medical Supplies",
+                    "location": "Area18",
+                    "sell_price": 250,
+                    "demand": 500,
+                    "confidence_score": 0.9,
+                    "patch_version": "4.0",
+                    "server_shard": "A",
+                },
+            ],
+        })
+        self.assertEqual(imported.status_code, 200, imported.text)
+        response = self.client.post("/api/v2/routes", json={
+            "cargo_capacity": 20,
+            "minimum_confidence": 0.8,
+            "patch_version": "4.0",
+            "server_shard": "A",
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        routes = response.json()["routes"]
+        self.assertEqual(len(routes), 1)
+        self.assertEqual(routes[0]["commodity"], "Medical Supplies")
+        self.assertEqual(routes[0]["origin"], "Port Olisar")
+        self.assertEqual(routes[0]["destination"], "Area18")
+        self.assertEqual(routes[0]["quantity"], 20)
+        self.assertEqual(routes[0]["gross_profit"], 3000)
+        history = self.client.get("/api/v2/history", params={
+            "commodity": "Medical Supplies",
+            "location": "Port Olisar",
+            "patch_version": "4.0",
+            "server_shard": "A",
+        })
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.json()[0]["buy"], 100)
+        self.assertEqual(history.json()[0]["review_status"], "live")
+
+    def test_component_imports_are_independent_of_ship_imports(self):
+        response = self.client.post("/api/v2/imports/json", json={
+            "components": [{
+                "name": "CF-337 Panther",
+                "type": "Weapon",
+                "size": 3,
+                "grade": "C",
+                "manufacturer": "Behring",
+            }],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        components = self.client.get("/api/v2/components", params={"search": "Panther"})
+        self.assertEqual(components.status_code, 200)
+        self.assertEqual(components.json()[0]["name"], "CF-337 Panther")
+
+    def test_external_importers_reject_non_https_and_host_spoofing(self):
+        importer = API_IMPORTERS["uex"]
+        with patch.dict(os.environ, {"SCIP_IMPORT_UEX_URL": "http://uexcorp.space/data"}):
+            with self.assertRaises(ValueError):
+                importer.configured_url()
+        with patch.dict(os.environ, {"SCIP_IMPORT_UEX_URL": "https://uexcorp.space.evil.test/data"}):
+            with self.assertRaises(ValueError):
+                importer.configured_url()
+        with patch.dict(os.environ, {"SCIP_IMPORT_UEX_URL": "https://api.uexcorp.space/data"}):
+            self.assertEqual(importer.configured_url(), "https://api.uexcorp.space/data")
+
+    def test_fleet_mutation_methods_are_allowed_by_desktop_cors(self):
+        for method in ("PUT", "DELETE"):
+            response = self.client.options(
+                "/api/v2/fleets/example",
+                headers={
+                    "Origin": "http://127.0.0.1:1420",
+                    "Access-Control-Request-Method": method,
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(method, response.headers["access-control-allow-methods"])
 
     def test_report_submission_is_authenticated_and_pending_review(self):
         unauthorized = self.client.post("/api/v2/reports", json=self.report())
